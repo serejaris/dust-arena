@@ -171,6 +171,17 @@ const labelCanvas = (text) => {
   ctx.strokeText(text, 128, 34); ctx.fillText(text, 128, 34);
   return cv;
 };
+const MAX_HP = 100;
+const hpColor = (hp) => hp > 50 ? '#7CFC00' : hp > 25 ? '#ffce54' : '#ff5544';
+const HPBAR_W = 128, HPBAR_H = 16;
+const hpbarCanvas = () => { const cv = document.createElement('canvas'); cv.width = HPBAR_W; cv.height = HPBAR_H; return cv; };
+function drawHpbar(cv, hp) {
+  const ctx = cv.getContext('2d');
+  ctx.clearRect(0, 0, HPBAR_W, HPBAR_H);
+  ctx.fillStyle = 'rgba(0,0,0,0.55)'; ctx.fillRect(0, 0, HPBAR_W, HPBAR_H);
+  const frac = Math.max(0, Math.min(MAX_HP, hp)) / MAX_HP;
+  ctx.fillStyle = hpColor(hp); ctx.fillRect(1, 1, (HPBAR_W - 2) * frac, HPBAR_H - 2);
+}
 const HIP_Y = 0.7, BODY_Y = 0.85, GUN_Y = 1.2;
 function soldierModel(color, pid) {
   const g = new THREE.Group();
@@ -276,17 +287,27 @@ function updateParts(dt) {
 }
 
 // ---------- remote players ----------
-const remotes = new Map(); // id -> {group, label, buf:[], name, color, hp, dead, kills, deaths}
+const remotes = new Map(); // id -> {group, label, hpbar, hpCanvas, hpTex, buf:[], name, color, hp, dead, kills, deaths}
 function makeRemote(p) {
   const g = soldierModel(p.color, p.id);
   const tex = new THREE.CanvasTexture(labelCanvas(p.name));
   const label = new THREE.Sprite(new THREE.SpriteMaterial({ map: tex, depthTest: false }));
   label.scale.set(2.2, 0.42, 1); label.position.y = 2.3;
-  g.add(label);
+  const hpCanvas = hpbarCanvas(); drawHpbar(hpCanvas, p.hp);
+  const hpTex = new THREE.CanvasTexture(hpCanvas);
+  const hpbar = new THREE.Sprite(new THREE.SpriteMaterial({ map: hpTex, depthTest: false }));
+  hpbar.scale.set(2.0, 0.14, 1); hpbar.position.y = 2.05;
+  g.add(label, hpbar);
   g.position.set(p.x, p.y, p.z);
   scene.add(g);
-  remotes.set(p.id, { group: g, label, buf: [], name: p.name, color: p.color, team: p.team || 0, aimMeshes: g.userData.aimMeshes, hp: p.hp, dead: p.dead, fall: p.dead ? 1 : 0, kills: p.kills || 0, deaths: p.deaths || 0 });
+  remotes.set(p.id, { group: g, label, hpbar, hpCanvas, hpTex, buf: [], name: p.name, color: p.color, team: p.team || 0, aimMeshes: g.userData.aimMeshes, hp: p.hp, dead: p.dead, fall: p.dead ? 1 : 0, kills: p.kills || 0, deaths: p.deaths || 0 });
   if (p.dead) { g.rotation.x = Math.PI / 2; g.position.y = 0.2; }
+}
+function setRemoteHp(r, hp) {
+  if (hp === r.hp) return;
+  r.hp = hp;
+  drawHpbar(r.hpCanvas, hp);
+  r.hpTex.needsUpdate = true;
 }
 function disposeGroup(g) {
   g.traverse(c => { // legs now nest inside hip pivots — traverse, don't just walk children
@@ -302,7 +323,7 @@ function removeRemote(id) {
   if (r) { scene.remove(r.group); disposeGroup(r.group); remotes.delete(id); }
 }
 function killRemote(r) {
-  r.dead = true; r.fall = 0; r.group.visible = true; r.label.visible = false;
+  r.dead = true; r.fall = 0; r.group.visible = true; r.label.visible = false; r.hpbar.visible = false;
   resetAnim(r.group.userData.anim); // corpse lies flat, not mid-stride
   burst(r.group.position.clone().add(new THREE.Vector3(0, 1.2, 0)), 0x991111);
 }
@@ -325,7 +346,7 @@ function reviveRemote(r) {
   r.dead = false; r.fall = 0; r.buf = [];
   r.group.rotation.x = 0; r.group.position.y = 0;
   resetAnim(r.group.userData.anim);
-  r.group.visible = true; r.label.visible = true;
+  r.group.visible = true; r.label.visible = true; r.hpbar.visible = true;
 }
 
 // ---------- medkits ----------
@@ -543,7 +564,7 @@ function onMsg(m) {
         if (p.id === myId) { myHp = p.hp; myKills = p.kills; myDeaths = p.deaths; continue; }
         const r = remotes.get(p.id);
         if (!r) continue;
-        r.hp = p.hp; r.kills = p.kills; r.deaths = p.deaths;
+        setRemoteHp(r, p.hp); r.kills = p.kills; r.deaths = p.deaths;
         if (p.dead !== r.dead) { p.dead ? killRemote(r) : reviveRemote(r); } // missed-event sync
         if (p.dead) continue;
         r.buf.push({ time: m.now, x: p.x, y: p.y, z: p.z, ry: p.ry });
@@ -578,7 +599,7 @@ function onMsg(m) {
     }
     case 'hp':
       if (m.id === myId) { myHp = m.hp; flash(); slowUntil = performance.now() + 450; }
-      else { const r = remotes.get(m.id); if (r) { r.hp = m.hp; flinch(r); } }
+      else { const r = remotes.get(m.id); if (r) { setRemoteHp(r, m.hp); flinch(r); } }
       if (m.by === myId) hitmark();
       break;
     case 'die': {
@@ -968,7 +989,7 @@ function tick(now) {
 
   // HUD
   $('hp').textContent = '+' + Math.max(0, myHp);
-  $('hp').style.color = myHp > 50 ? '#7CFC00' : myHp > 25 ? '#ffce54' : '#ff5544';
+  $('hp').style.color = hpColor(myHp);
   if (!reloading) $('ammo').textContent = `${curW().name} ${ammo}/∞`;
   $('crosshair').style.fontSize = Math.round(16 + spread * 500) + 'px'; // dynamic: shows your accuracy
   const left = Math.max(0, roundEndsAt - (Date.now() + serverOffset));
