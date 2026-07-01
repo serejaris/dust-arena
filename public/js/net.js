@@ -146,7 +146,7 @@ function onMsg(m) {
         triggerRecoil(r.group.userData.anim); // shooter's gun kicks regardless of tracer geometry below
         if (m.o && m.d) {
           const o = new THREE.Vector3(...m.o);
-          tracer(o, new THREE.Vector3(...m.d));
+          if (r.visible) tracer(o, new THREE.Vector3(...m.d)); // fog (#1): hidden shooter's tracer stays hidden, sound below doesn't
           // spatialized: volume by distance to ME (not the camera — it hangs 120 away)
           const ear = S.me ? S.me.position : S.camTarget;
           const dist = ear.distanceTo(o);

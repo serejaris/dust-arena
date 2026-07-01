@@ -24,7 +24,7 @@ export function updateAim() {
   // aim assist: if the cursor is over a LIVE ENEMY, lock the shot to them
   aimTargetPid = 0;
   const targets = [];
-  for (const r of S.remotes.values()) if (!r.dead && r.team !== S.myTeam) targets.push(...r.aimMeshes);
+  for (const r of S.remotes.values()) if (!r.dead && r.team !== S.myTeam && r.visible) targets.push(...r.aimMeshes);
   const hits = cursorRay.intersectObjects(targets, false);
   if (hits[0]) {
     aimTargetPid = hits[0].object.userData.pid;

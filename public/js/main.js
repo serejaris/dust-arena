@@ -9,6 +9,7 @@ import { ring, aimLine, aimGeo, updateParts } from './fx.js';
 import { medkitMeshes, weaponMeshes, armorMeshes, boostMeshes, worldMeshes } from './world.js';
 import { updateAim } from './input.js';
 import { shoot, baseSpread } from './combat.js';
+import { updateVisibility } from './visibility.js';
 import { play, blip, shotSound } from './audio.js';
 import { TEAM_HUD, renderScores, sb } from './hud.js';
 import { SPECTATE } from './net.js';
@@ -21,6 +22,7 @@ function tick(now) {
   const dt = Math.min((now - lastT) / 1000, 0.05);
   lastT = now;
   let myMoving = false;
+  updateVisibility(); // fog of war (#1) — every frame, before aim-assist reads r.visible below
 
   if (S.ws && !S.dead && !S.frozen && !SPECTATE) {
     // world-aligned WASD (camera never yaws: screen-up IS north)
