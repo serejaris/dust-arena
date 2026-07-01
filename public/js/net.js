@@ -2,7 +2,7 @@
 import * as THREE from 'three';
 import { S, $ } from './state.js';
 import './scene.js'; // populates S.camera before the SPECTATE block below can touch it
-import { makeRemote, removeRemote, killRemote, flinch, reviveRemote, setRemoteHp, buildMe, swapGun, resetAnim, labelCanvas, TAUNTS } from './entities.js';
+import { makeRemote, removeRemote, killRemote, flinch, reviveRemote, setRemoteHp, buildMe, swapGun, resetAnim, labelCanvas, TAUNTS, triggerRecoil } from './entities.js';
 import { buildMedkits, buildWeaponSpawns, buildArmor, buildBoosts, medkitMeshes, weaponMeshes, armorMeshes, boostMeshes } from './world.js';
 import { curW } from './weapons.js';
 import { rebuildRing, tracer } from './fx.js';
@@ -142,14 +142,17 @@ function onMsg(m) {
       break;
     case 'shoot': {
       const r = S.remotes.get(m.id);
-      if (r && m.o && m.d) {
-        const o = new THREE.Vector3(...m.o);
-        tracer(o, new THREE.Vector3(...m.d));
-        // spatialized: volume by distance to ME (not the camera — it hangs 120 away)
-        const ear = S.me ? S.me.position : S.camTarget;
-        const dist = ear.distanceTo(o);
-        const pan = THREE.MathUtils.clamp((o.x - ear.x) / (dist || 1), -1, 1);
-        shotSound(Math.min(0.3, 4 / (dist + 2)), pan);
+      if (r) {
+        triggerRecoil(r.group.userData.anim); // shooter's gun kicks regardless of tracer geometry below
+        if (m.o && m.d) {
+          const o = new THREE.Vector3(...m.o);
+          tracer(o, new THREE.Vector3(...m.d));
+          // spatialized: volume by distance to ME (not the camera — it hangs 120 away)
+          const ear = S.me ? S.me.position : S.camTarget;
+          const dist = ear.distanceTo(o);
+          const pan = THREE.MathUtils.clamp((o.x - ear.x) / (dist || 1), -1, 1);
+          shotSound(Math.min(0.3, 4 / (dist + 2)), pan);
+        }
       }
       break;
     }
@@ -167,15 +170,15 @@ function onMsg(m) {
       break;
     }
     case 'hp':
-      if (m.id === S.myId) { S.myHp = m.hp; S.myArmor = m.armor || 0; flash(); S.slowUntil = performance.now() + 450; }
-      else { const r = S.remotes.get(m.id); if (r) { setRemoteHp(r, m.hp); flinch(r); } }
+      if (m.id === S.myId) { S.myHp = m.hp; S.myArmor = m.armor || 0; flash(); S.slowUntil = performance.now() + 450; if (S.me) flinch(S.me); }
+      else { const r = S.remotes.get(m.id); if (r) { setRemoteHp(r, m.hp); flinch(r.group); } }
       if (m.by === S.myId) hitmark();
       break;
     case 'die': {
       const killer = m.by === S.myId ? 'you' : (S.remotes.get(m.by)?.name || '?');
       const victim = m.id === S.myId ? 'you' : (S.remotes.get(m.id)?.name || '?');
       feed(`${killer} ☠ ${victim}`);
-      if (m.id === S.myId) { S.dead = true; S.myHp = 0; S.myArmor = 0; showMsg('YOU DIED — respawning…', 2000); flash(); $('deathveil').style.opacity = 1; play('death', 0.8); if (S.me) { S.me.rotation.x = Math.PI / 2; resetAnim(S.me.userData.anim); } }
+      if (m.id === S.myId) { S.dead = true; S.myHp = 0; S.myArmor = 0; showMsg('YOU DIED — respawning…', 2000); flash(); $('deathveil').style.opacity = 1; play('death', 0.8); if (S.me) resetAnim(S.me.userData.anim); } // deathT=0 → tick()'s advanceDeath() animates the fall while S.dead is true
       else {
         const r = S.remotes.get(m.id);
         if (r) {

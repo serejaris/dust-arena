@@ -1,7 +1,12 @@
 // entities.js — gunModel/soldierModel/animateWalk/resetAnim/swapGun/buildMe + remotes CRUD + taunts
 //
-// Implicit contract with combat.js/main.js: userData.anim = {body, gun, legL, legR, phase},
-// userData.aimMeshes, and userData.pid are attached to every soldier group here and read
+// Implicit contract with combat.js/main.js/net.js: userData.anim = {
+//   group, body, gun, legL, legR, phase,                 — walk-cycle pose (animateWalk/resetAnim)
+//   recoilT, hitT: 0..1 decay energy; reloadT: 0..1 smoothed blend; deathT: 0..1 fall progress
+// }. Combat layers (recoil/hit/reload/death) are additive offsets applied by advanceCombatAnim()/
+// advanceDeath() ON TOP of the walk pose each frame, AFTER animateWalk() runs — state lives on the
+// anim struct, never on the gun/body mesh itself, so it survives swapGun() and doesn't drift.
+// userData.aimMeshes and userData.pid are attached to every soldier group here and read
 // directly by other modules (aim-assist raycasts, animateWalk, damage flinch). Keep as-is.
 import * as THREE from 'three';
 import { S } from './state.js';
@@ -29,14 +34,14 @@ function drawHpbar(cv, hp) {
   const frac = Math.max(0, Math.min(MAX_HP, hp)) / MAX_HP;
   ctx.fillStyle = hpColor(hp); ctx.fillRect(1, 1, (HPBAR_W - 2) * frac, HPBAR_H - 2);
 }
-const HIP_Y = 0.7, BODY_Y = 0.85, GUN_Y = 1.2;
+const HIP_Y = 0.7, BODY_Y = 0.85, GUN_Y = 1.2, GUN_X = 0.25, GUN_BASE_Z = -0.3;
 const GUN_DARK = 0x333028;
 // low-poly silhouette per weapon type — dark receiver/barrel boxes + one accent box in WEAPONS[w].color.
 // Group is pre-positioned at the old single-mesh gun anchor so callers can just add() it.
 function gunModel(w) {
   const wpn = WEAPONS[w] || WEAPONS[0];
   const g = new THREE.Group();
-  g.position.set(0.25, GUN_Y, -0.3);
+  g.position.set(GUN_X, GUN_Y, GUN_BASE_Z);
   const add = (sx, sy, sz, x, y, z, color) => {
     const m = new THREE.Mesh(new THREE.BoxGeometry(sx, sy, sz), new THREE.MeshLambertMaterial({ color }));
     m.position.set(x, y, z);
@@ -92,7 +97,7 @@ function soldierModel(color, pid, w = 0) {
   g.add(body, head, gun, legL.pivot, legR.pivot);
   if (pid != null) for (const m of [body, head, legL.leg, legR.leg]) m.userData.pid = pid;
   g.userData.aimMeshes = [body, head, legL.leg, legR.leg];
-  g.userData.anim = { body, gun, legL: legL.pivot, legR: legR.pivot, phase: 0 };
+  g.userData.anim = { group: g, body, gun, legL: legL.pivot, legR: legR.pivot, phase: 0, recoilT: 0, hitT: 0, reloadT: 0, deathT: 0 };
   return g;
 }
 // shared walk cycle: legs swing in antiphase, torso + gun bob on the down-beat
@@ -114,11 +119,46 @@ export function animateWalk(anim, dt, moving) {
     anim.gun.position.y += (GUN_Y - anim.gun.position.y) * k;
   }
 }
-// snap legs/torso to neutral — dead bodies skip animateWalk, so reset on death & respawn
+// snap legs/torso/gun to neutral and clear combat-layer timers — dead bodies skip animateWalk,
+// so reset on death (deathT=0 also arms the fall — advanceDeath() then animates it) & on respawn/revive
 export function resetAnim(anim) {
   if (!anim) return;
   anim.legL.rotation.x = 0; anim.legR.rotation.x = 0;
-  anim.body.position.y = BODY_Y; anim.gun.position.y = GUN_Y; anim.phase = 0;
+  anim.body.position.y = BODY_Y; anim.body.rotation.x = 0;
+  anim.gun.position.y = GUN_Y; anim.gun.position.z = GUN_BASE_Z; anim.gun.rotation.x = 0;
+  anim.phase = 0;
+  anim.recoilT = 0; anim.hitT = 0; anim.reloadT = 0; anim.deathT = 0;
+}
+// ---------- combat animation layers — additive, applied AFTER animateWalk() writes this frame's
+// base pose. recoil/hit are decaying impulses (trigger sets energy to 1, exponential decay);
+// reload is a continuous blend toward the S.reloading flag (no separate duration, per #6); death
+// is a one-shot 0→1 progress that eases the whole group onto its side.
+// NB: only gun.position.z/rotation.x and body.rotation.x are used here — animateWalk() never
+// touches those (it only writes body/gun .position.y absolutely-when-moving-but-EASED-when-idle),
+// so a plain "+=" on position.y would compound frame-over-frame while idle. Position.y is walk's alone. ----------
+const RECOIL_DECAY = 30, RECOIL_KICK_Z = 0.16, RECOIL_LIFT_ROT = 0.12; // ~100ms to fade (exp(-30*0.1)≈0.05)
+const HIT_DECAY = 15, HIT_TILT = 0.15;                                 // ~200ms to fade
+const RELOAD_LERP = 8, RELOAD_TILT = 0.45;
+const DEATH_DUR = 0.42;
+export function triggerRecoil(anim) { if (anim) anim.recoilT = 1; }
+export function triggerHit(anim) { if (anim) anim.hitT = 1; }
+// recoil/hit/reload — call every frame for the local player and every remote (reloading only ever true for self)
+export function advanceCombatAnim(anim, dt, reloading = false) {
+  if (!anim) return;
+  anim.recoilT *= Math.exp(-RECOIL_DECAY * dt);
+  anim.hitT *= Math.exp(-HIT_DECAY * dt);
+  anim.reloadT += ((reloading ? 1 : 0) - anim.reloadT) * Math.min(1, RELOAD_LERP * dt);
+  anim.gun.position.z = GUN_BASE_Z + anim.recoilT * RECOIL_KICK_Z; // walk never touches z — safe to set absolutely
+  anim.gun.rotation.x = anim.reloadT * RELOAD_TILT - anim.recoilT * RECOIL_LIFT_ROT; // walk never touches gun rotation — safe to set absolutely
+  anim.body.rotation.x = anim.hitT * HIT_TILT;
+}
+// procedural death fall — call every frame while dead; holds the settled pose once deathT hits 1
+export function advanceDeath(anim, dt) {
+  if (!anim || anim.deathT >= 1) return;
+  anim.deathT = Math.min(1, anim.deathT + dt / DEATH_DUR);
+  const e = 1 - Math.pow(1 - anim.deathT, 3);
+  anim.group.rotation.x = e * Math.PI / 2 * 0.97;
+  anim.group.position.y = e * 0.2;
 }
 // rebuild the held gun on weapon pickup/reset — old mesh disposed, anim.gun repointed so bobbing tracks the new one
 export function swapGun(avatarGroup, w) {
@@ -156,8 +196,8 @@ export function makeRemote(p) {
   g.add(label, hpbar);
   g.position.set(p.x, p.y, p.z);
   S.scene.add(g);
-  S.remotes.set(p.id, { group: g, label, hpbar, hpCanvas, hpTex, buf: [], name: p.name, color: p.color, team: p.team || 0, aimMeshes: g.userData.aimMeshes, hp: p.hp, w: p.w || 0, dead: p.dead, fall: p.dead ? 1 : 0, kills: p.kills || 0, deaths: p.deaths || 0 });
-  if (p.dead) { g.rotation.x = Math.PI / 2; g.position.y = 0.2; }
+  S.remotes.set(p.id, { group: g, label, hpbar, hpCanvas, hpTex, buf: [], name: p.name, color: p.color, team: p.team || 0, aimMeshes: g.userData.aimMeshes, hp: p.hp, w: p.w || 0, dead: p.dead, kills: p.kills || 0, deaths: p.deaths || 0 });
+  if (p.dead) { g.userData.anim.deathT = 1; g.rotation.x = Math.PI / 2 * 0.97; g.position.y = 0.2; } // join mid-death: snap straight to the settled corpse pose
 }
 export function setRemoteHp(r, hp) {
   if (hp === r.hp) return;
@@ -179,16 +219,20 @@ export function removeRemote(id) {
   if (r) { S.scene.remove(r.group); disposeGroup(r.group); S.remotes.delete(id); }
 }
 export function killRemote(r) {
-  r.dead = true; r.fall = 0; r.group.visible = true; r.label.visible = false; r.hpbar.visible = false;
-  resetAnim(r.group.userData.anim); // corpse lies flat, not mid-stride
+  r.dead = true; r.group.visible = true; r.label.visible = false; r.hpbar.visible = false;
+  resetAnim(r.group.userData.anim); // corpse lies flat, not mid-stride; deathT=0 arms advanceDeath() to fall from here
   burst(r.group.position.clone().add(new THREE.Vector3(0, 1.2, 0)), 0x991111);
 }
-export function flinch(r) {
-  r.group.traverse(c => { if (c.material && c.material.emissive) c.material.emissive.setHex(0x661111); });
-  clearTimeout(r.flinchT);
-  r.flinchT = setTimeout(() => {
-    r.group.traverse(c => { if (c.material && c.material.emissive) c.material.emissive.setHex(0); });
+// emissive damage-flash + hit-flinch body tilt; takes the avatar Group directly so it works for
+// remotes (r.group) and the local player (S.me) alike — flinchT lives on userData so both are stateless callers
+export function flinch(group) {
+  if (!group) return;
+  group.traverse(c => { if (c.material && c.material.emissive) c.material.emissive.setHex(0x661111); });
+  clearTimeout(group.userData.flinchT);
+  group.userData.flinchT = setTimeout(() => {
+    group.traverse(c => { if (c.material && c.material.emissive) c.material.emissive.setHex(0); });
   }, 90);
+  triggerHit(group.userData.anim);
 }
 export const TAUNTS = ['EZ', 'NICE SHOT', 'RUSH B', 'HELP!'];
 let tauntCd = 0;
@@ -199,7 +243,7 @@ export function taunt(n) {
   showMsg(TAUNTS[n], 1000);
 }
 export function reviveRemote(r) {
-  r.dead = false; r.fall = 0; r.buf = [];
+  r.dead = false; r.buf = [];
   r.group.rotation.x = 0; r.group.position.y = 0;
   resetAnim(r.group.userData.anim);
   r.group.visible = true; r.label.visible = true; r.hpbar.visible = true;

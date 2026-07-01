@@ -4,7 +4,7 @@ import { S, $ } from './state.js';
 import { P } from './physics.js';
 import { WEAPONS, curW } from './weapons.js';
 import { rebuildRing, tracer, partGeo, parts } from './fx.js';
-import { swapGun, myMuzzle } from './entities.js';
+import { swapGun, myMuzzle, triggerRecoil } from './entities.js';
 import { shotBlockers } from './world.js';
 import { shotSound, play } from './audio.js';
 import { aimTargetPid } from './input.js';
@@ -102,4 +102,5 @@ export function shoot(now) {
   myMuzzle.visible = true;
   clearTimeout(myMuzzle.userData.t);
   myMuzzle.userData.t = setTimeout(() => myMuzzle.visible = false, 45);
+  if (S.me) triggerRecoil(S.me.userData.anim);
 }

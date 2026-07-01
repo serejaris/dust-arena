@@ -4,7 +4,7 @@ import { S, $ } from './state.js';
 import { renderer, CAM, camOffY, camOffZ, updateOcclusion } from './scene.js';
 import { P, collide } from './physics.js';
 import { curW } from './weapons.js';
-import { animateWalk, hpColor } from './entities.js';
+import { animateWalk, advanceCombatAnim, advanceDeath, hpColor } from './entities.js';
 import { ring, aimLine, aimGeo, updateParts } from './fx.js';
 import { medkitMeshes, weaponMeshes, armorMeshes, boostMeshes, worldMeshes } from './world.js';
 import { updateAim } from './input.js';
@@ -72,9 +72,15 @@ function tick(now) {
 
   // own avatar + aim widgets
   if (S.me) {
-    S.me.position.set(S.pos.x, S.pos.y + (S.dead ? 0.2 : 0), S.pos.z); // lift corpse out of the floor
-    if (!S.dead) S.me.rotation.y = S.yaw;
-    animateWalk(S.me.userData.anim, dt, myMoving && !S.dead);
+    S.me.position.x = S.pos.x; S.me.position.z = S.pos.z;
+    if (S.dead) {
+      advanceDeath(S.me.userData.anim, dt); // owns rotation.x/position.y while falling/lying
+    } else {
+      S.me.rotation.y = S.yaw;
+      S.me.position.y = S.pos.y;
+      animateWalk(S.me.userData.anim, dt, myMoving);
+      advanceCombatAnim(S.me.userData.anim, dt, S.reloading); // recoil/hit decay + reload tilt, atop the walk pose just set
+    }
     ring.position.set(S.pos.x, S.pos.y + 0.06, S.pos.z);
     ring.visible = !S.dead && !SPECTATE;
     const from = new THREE.Vector3(S.pos.x, S.pos.y + 1.1, S.pos.z);
@@ -101,15 +107,7 @@ function tick(now) {
   // interpolate remotes (render 120ms in the past)
   const renderTime = Date.now() + S.serverOffset - 120;
   for (const r of S.remotes.values()) {
-    if (r.dead) { // fall over and lie until respawn
-      if (r.fall < 1) {
-        r.fall = Math.min(1, r.fall + dt * 2.4);
-        const e = 1 - Math.pow(1 - r.fall, 3);
-        r.group.rotation.x = e * Math.PI / 2 * 0.97;
-        r.group.position.y = e * 0.2;
-      }
-      continue;
-    }
+    if (r.dead) { advanceDeath(r.group.userData.anim, dt); continue; } // fall over and lie until respawn
     const prevX = r.group.position.x, prevZ = r.group.position.z;
     const b = r.buf;
     while (b.length > 2 && b[1].time <= renderTime) b.shift();
@@ -127,6 +125,7 @@ function tick(now) {
     // drive the walk cycle from how far the remote actually slid this frame
     const moved = Math.hypot(r.group.position.x - prevX, r.group.position.z - prevZ);
     animateWalk(r.group.userData.anim, dt, moved > 0.012);
+    advanceCombatAnim(r.group.userData.anim, dt); // recoil/hit decay atop the walk pose just set (no reload — not broadcast)
   }
 
   // net send 20Hz
