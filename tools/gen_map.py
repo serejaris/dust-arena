@@ -2,6 +2,10 @@
 """dust-arena map v3 generator — top-down de_dust2 homage (Brawl-Stars camera).
 
 Emits public/map.json {boxes, spawns, medkits} consumed by BOTH client and server.
+WARNING: public/map.json also carries `weaponSpawns`, `armor`, and `boosts` arrays that
+are added BY HAND (not emitted by this script's emit()). Re-running this generator
+overwrites public/map.json and WILL WIPE those manual fields — re-add them after
+regenerating, or patch emit() first if they need to become generator-managed.
 Top-down rules (from research):
   - walkable walls cap at 2.2 (1.2x player height) so a 60-deg camera reads the map
   - buildings = solid 2.4-high "roof" blocks players can never climb

@@ -13,6 +13,10 @@ const MAX_HP = 100;
 const MEDKIT_HEAL = 50;
 const MEDKIT_RESPAWN_MS = 25000;
 const SPAWN_PROT_MS = 1500;
+const ARMOR_MAX = 50;
+const ARMOR_RESPAWN_MS = 25000;
+const BOOST_MS = 8000;          // client-applied speed buff duration — server only gates the pickup/respawn
+const BOOST_RESPAWN_MS = 20000;
 // weapon table — single source of truth for dmg/fireMs/range/mag. id = index, id 0 = default spawn (not a pickup).
 const WEAPONS = [
   { id: 0, name: 'rifle',   dmg: 18,  fireMs: 110,  range: 40, mag: 30  },
@@ -30,6 +34,8 @@ const MAP = JSON.parse(fs.readFileSync(path.join(__dirname, 'public', 'map.json'
 const MEDKITS = MAP.medkits;   // [x, z]
 const SPAWNS = MAP.spawns;     // [x, y, z] — first half = T (south +1.5 plateau), second = CT (north)
 const WEAPON_SPAWNS = MAP.weaponSpawns || []; // [{x, z, w}] — 5 pickup points, w = 1..5
+const ARMOR_SPAWNS = MAP.armor || [];   // [[x, z, y]] — same shape as medkits
+const BOOST_SPAWNS = MAP.boosts || [];  // [[x, z, y]] — same shape as medkits
 
 // teams: 0 = T (warm), 1 = CT (cool). spawns split T/CT, colors shaded so teammates differ.
 const HALF = Math.floor(SPAWNS.length / 2);
@@ -74,6 +80,8 @@ function getRoom(name) {
       nextTeam: 0,        // tie-break toggle for balanced team assignment
       medkits: MEDKITS.map(() => ({ downUntil: 0 })),
       weapons: WEAPON_SPAWNS.map(() => ({ downUntil: 0 })),
+      armor: ARMOR_SPAWNS.map(() => ({ downUntil: 0 })),
+      boosts: BOOST_SPAWNS.map(() => ({ downUntil: 0 })),
     };
     rooms.set(name, room);
   }
@@ -117,7 +125,7 @@ function publicPlayer(p) {
   return {
     id: p.id, name: p.name, color: p.color, team: p.team,
     x: p.x, y: p.y, z: p.z, ry: p.ry, rx: p.rx,
-    hp: p.hp, kills: p.kills, deaths: p.deaths, dead: p.dead, w: p.w,
+    hp: p.hp, kills: p.kills, deaths: p.deaths, dead: p.dead, w: p.w, armor: p.armor,
   };
 }
 
@@ -148,6 +156,8 @@ wss.on('connection', (ws) => {
           medkits: room.medkits.map(m => m.downUntil > Date.now() ? 0 : 1),
           weaponSpawns: WEAPON_SPAWNS.map(s => ({ x: s.x, z: s.z, w: s.w })),
           weapons: room.weapons.map(m => m.downUntil > Date.now() ? 0 : 1),
+          armor: room.armor.map(a => a.downUntil > Date.now() ? 0 : 1),
+          boosts: room.boosts.map(b => b.downUntil > Date.now() ? 0 : 1),
           roundEndsAt: room.roundEndsAt, now: Date.now(),
           frozen: room.breakUntil > Date.now(),
         }));
@@ -162,7 +172,7 @@ wss.on('connection', (ws) => {
         x: sx, y: sy, z: sz, ry: 0, rx: 0,
         hp: MAX_HP, kills: 0, deaths: 0, dead: false,
         protUntil: Date.now() + SPAWN_PROT_MS,
-        w: 0,
+        w: 0, armor: 0,
       };
       room.players.set(player.id, player);
       room.sockets.set(player.id, ws);
@@ -172,6 +182,8 @@ wss.on('connection', (ws) => {
         medkits: room.medkits.map(m => m.downUntil > Date.now() ? 0 : 1),
         weaponSpawns: WEAPON_SPAWNS.map(s => ({ x: s.x, z: s.z, w: s.w })),
         weapons: room.weapons.map(m => m.downUntil > Date.now() ? 0 : 1),
+        armor: room.armor.map(a => a.downUntil > Date.now() ? 0 : 1),
+        boosts: room.boosts.map(b => b.downUntil > Date.now() ? 0 : 1),
         roundEndsAt: room.roundEndsAt, now: Date.now(),
         frozen: room.breakUntil > Date.now(),
       }));
@@ -217,6 +229,33 @@ wss.on('connection', (ws) => {
             }
           }
         }
+        if (player.armor < ARMOR_MAX && !(room.breakUntil > Date.now())) {
+          for (let i = 0; i < ARMOR_SPAWNS.length; i++) {
+            const ak = room.armor[i];
+            if (!ak || ak.downUntil) continue;
+            const [ax, az, ay] = ARMOR_SPAWNS[i];
+            const dx = player.x - ax, dz = player.z - az, dy = player.y - (ay || 0);
+            if (dx * dx + dz * dz < 2.2 && Math.abs(dy) < 1.6) {
+              ak.downUntil = Date.now() + ARMOR_RESPAWN_MS;
+              player.armor = ARMOR_MAX;
+              broadcast(room, { t: 'armorpk', i, id: player.id, armor: player.armor });
+              break;
+            }
+          }
+        }
+        if (!(room.breakUntil > Date.now())) {
+          for (let i = 0; i < BOOST_SPAWNS.length; i++) {
+            const bk = room.boosts[i];
+            if (!bk || bk.downUntil) continue;
+            const [bx, bz, by] = BOOST_SPAWNS[i];
+            const dx = player.x - bx, dz = player.z - bz, dy = player.y - (by || 0);
+            if (dx * dx + dz * dz < 2.2 && Math.abs(dy) < 1.6) {
+              bk.downUntil = Date.now() + BOOST_RESPAWN_MS;
+              broadcast(room, { t: 'boostpk', i, id: player.id, until: Date.now() + BOOST_MS });
+              break;
+            }
+          }
+        }
         break;
       }
       case 'shoot': { // tracer/sound relay — capped & validated (broadcast amplification)
@@ -243,9 +282,14 @@ wss.on('connection', (ws) => {
         const nextHit = Math.max(player.nextHit || 0, now - 240) + wpn.fireMs;
         if (nextHit > now + 240) break;
         player.nextHit = nextHit;
-        target.hp -= wpn.dmg;
+        let dmg = wpn.dmg;
+        if (target.armor > 0) { // armor eats damage first, HP untouched while it lasts
+          const abs = Math.min(target.armor, dmg);
+          target.armor -= abs; dmg -= abs;
+        }
+        target.hp -= dmg;
         if (target.hp <= 0) {
-          target.hp = 0; target.dead = true;
+          target.hp = 0; target.dead = true; target.armor = 0;
           target.deaths++; player.kills++;
           player.streak = (player.streak || 0) + 1;
           target.streak = 0;
@@ -253,7 +297,7 @@ wss.on('connection', (ws) => {
           setTimeout(() => {
             if (!room.players.has(target.id)) return;
             const [sx, sy, sz] = pickSpawn(room, target, target.team);
-            target.hp = MAX_HP; target.dead = false;
+            target.hp = MAX_HP; target.dead = false; target.armor = 0;
             target.protUntil = Date.now() + SPAWN_PROT_MS;
             target.w = 0;
             target.x = sx; target.y = sy; target.z = sz;
@@ -261,7 +305,7 @@ wss.on('connection', (ws) => {
             broadcast(room, { t: 'respawn', id: target.id, spawn: [sx, sy, sz] });
           }, RESPAWN_MS);
         } else {
-          broadcast(room, { t: 'hp', id: target.id, hp: target.hp, by: player.id });
+          broadcast(room, { t: 'hp', id: target.id, hp: target.hp, armor: target.armor, by: player.id });
         }
         break;
       }
@@ -297,10 +341,12 @@ setInterval(() => {
         room.roundEndsAt = now + ROUND_MS;
         for (const m of room.medkits) m.downUntil = 0;
         for (const m of room.weapons) m.downUntil = 0;
+        for (const a of room.armor) a.downUntil = 0;
+        for (const b of room.boosts) b.downUntil = 0;
         for (const p of room.players.values()) {
           p.kills = 0; p.deaths = 0; p.hp = MAX_HP; p.dead = false; p.streak = 0;
           p.protUntil = now + SPAWN_PROT_MS;
-          p.w = 0;
+          p.w = 0; p.armor = 0;
           const [sx, sy, sz] = pickSpawn(room, p, p.team);
           p.x = sx; p.y = sy; p.z = sz;
           p.ignoreStateUntil = now + 300;
@@ -328,11 +374,21 @@ setInterval(() => {
       const wk = room.weapons[i];
       if (wk.downUntil && now >= wk.downUntil) { wk.downUntil = 0; broadcast(room, { t: 'weaponup', i }); }
     }
+    // armor respawns
+    for (let i = 0; i < room.armor.length; i++) {
+      const ak = room.armor[i];
+      if (ak.downUntil && now >= ak.downUntil) { ak.downUntil = 0; broadcast(room, { t: 'armorup', i }); }
+    }
+    // boost respawns
+    for (let i = 0; i < room.boosts.length; i++) {
+      const bk = room.boosts[i];
+      if (bk.downUntil && now >= bk.downUntil) { bk.downUntil = 0; broadcast(room, { t: 'boostup', i }); }
+    }
     // state tick
     if (room.players.size > 0) {
       broadcast(room, {
         t: 'states', now,
-        players: [...room.players.values()].map(p => ({ id: p.id, x: p.x, y: p.y, z: p.z, ry: p.ry, rx: p.rx, hp: p.hp, dead: p.dead, kills: p.kills, deaths: p.deaths, w: p.w })),
+        players: [...room.players.values()].map(p => ({ id: p.id, x: p.x, y: p.y, z: p.z, ry: p.ry, rx: p.rx, hp: p.hp, dead: p.dead, kills: p.kills, deaths: p.deaths, w: p.w, armor: p.armor })),
       });
     }
   }

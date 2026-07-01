@@ -6,7 +6,7 @@ import { P, collide } from './physics.js';
 import { curW } from './weapons.js';
 import { animateWalk, hpColor } from './entities.js';
 import { ring, aimLine, aimGeo, updateParts } from './fx.js';
-import { medkitMeshes, weaponMeshes, worldMeshes } from './world.js';
+import { medkitMeshes, weaponMeshes, armorMeshes, boostMeshes, worldMeshes } from './world.js';
 import { updateAim } from './input.js';
 import { shoot, baseSpread } from './combat.js';
 import { play, blip, shotSound } from './audio.js';
@@ -30,8 +30,9 @@ function tick(now) {
     if (S.keys['KeyD']) move.x += 1;
     if (S.keys['KeyA']) move.x -= 1;
     if (move.lengthSq() > 0) move.normalize();
-    // tagging: getting hit slows you for 450ms
-    const sp = (S.keys['ShiftLeft'] ? P.walk : P.speed) * (now < S.slowUntil ? 0.55 : 1);
+    // tagging: getting hit slows you for 450ms; boost pickup speeds you up for 8s (client-side feel only)
+    const boosted = (Date.now() + S.serverOffset) < S.boostUntil;
+    const sp = (S.keys['ShiftLeft'] ? P.walk : P.speed) * (now < S.slowUntil ? 0.55 : 1) * (boosted ? 1.4 : 1);
     S.hSpeed = move.lengthSq() > 0 ? sp : 0;
     S.pos.x += move.x * sp * dt;
     S.pos.z += move.z * sp * dt;
@@ -57,6 +58,16 @@ function tick(now) {
     if (!wm.visible) continue;
     wm.rotation.y += dt * 1.6;
     wm.position.y = wm.userData.baseY + 0.12 + Math.sin(now * 0.0035) * 0.1;
+  }
+  for (const am of armorMeshes) {
+    if (!am.visible) continue;
+    am.rotation.y += dt * 1.6;
+    am.position.y = am.userData.baseY + 0.12 + Math.sin(now * 0.0035) * 0.1;
+  }
+  for (const bm of boostMeshes) {
+    if (!bm.visible) continue;
+    bm.rotation.y += dt * 1.6;
+    bm.position.y = bm.userData.baseY + 0.12 + Math.sin(now * 0.0035) * 0.1;
   }
 
   // own avatar + aim widgets
@@ -127,6 +138,8 @@ function tick(now) {
   // HUD
   $('hp').textContent = '+' + Math.max(0, S.myHp);
   $('hp').style.color = hpColor(S.myHp);
+  $('armor').style.display = S.myArmor > 0 ? 'block' : 'none';
+  if (S.myArmor > 0) $('armor').textContent = 'ARM ' + Math.round(S.myArmor);
   if (!S.reloading) $('ammo').textContent = `${curW().name} ${S.ammo}/∞`;
   $('crosshair').style.fontSize = Math.round(16 + S.spread * 500) + 'px'; // dynamic: shows your accuracy
   const left = Math.max(0, S.roundEndsAt - (Date.now() + S.serverOffset));

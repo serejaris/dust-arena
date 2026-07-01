@@ -3,7 +3,7 @@ import * as THREE from 'three';
 import { S, $ } from './state.js';
 import './scene.js'; // populates S.camera before the SPECTATE block below can touch it
 import { makeRemote, removeRemote, killRemote, flinch, reviveRemote, setRemoteHp, buildMe, swapGun, resetAnim, labelCanvas, TAUNTS } from './entities.js';
-import { buildMedkits, buildWeaponSpawns, medkitMeshes, weaponMeshes } from './world.js';
+import { buildMedkits, buildWeaponSpawns, buildArmor, buildBoosts, medkitMeshes, weaponMeshes, armorMeshes, boostMeshes } from './world.js';
 import { curW } from './weapons.js';
 import { rebuildRing, tracer } from './fx.js';
 import { play, healSound, blip, shotSound, AC } from './audio.js';
@@ -69,7 +69,7 @@ function onMsg(m) {
   switch (m.t) {
     case 'init':
       for (const id of [...S.remotes.keys()]) removeRemote(id); // clean slate (reconnect)
-      S.dead = false; S.frozen = !!m.frozen; S.myHp = 100;
+      S.dead = false; S.frozen = !!m.frozen; S.myHp = 100; S.myArmor = 0; S.boostUntil = 0;
       $('deathveil').style.opacity = 0;
       showMsg('', 1);
       S.myId = m.id;
@@ -81,6 +81,8 @@ function onMsg(m) {
       }
       buildMedkits(m.medkits || []);
       buildWeaponSpawns(m.weapons || []);
+      buildArmor(m.armor || []);
+      buildBoosts(m.boosts || []);
       snapCamera();
       break;
     case 'pong':
@@ -109,11 +111,25 @@ function onMsg(m) {
     case 'weaponup':
       if (weaponMeshes[m.i]) weaponMeshes[m.i].visible = true;
       break;
+    case 'armorpk':
+      if (armorMeshes[m.i]) armorMeshes[m.i].visible = false;
+      if (m.id === S.myId) { S.myArmor = m.armor; if (!play('medkit', 0.7)) blip(); }
+      break;
+    case 'armorup':
+      if (armorMeshes[m.i]) armorMeshes[m.i].visible = true;
+      break;
+    case 'boostpk':
+      if (boostMeshes[m.i]) boostMeshes[m.i].visible = false;
+      if (m.id === S.myId) { S.boostUntil = m.until; if (!play('medkit', 0.7)) blip(); }
+      break;
+    case 'boostup':
+      if (boostMeshes[m.i]) boostMeshes[m.i].visible = true;
+      break;
     case 'joined': makeRemote(m.player); feed(`${m.player.name} joined`); break;
     case 'left': { const r = S.remotes.get(m.id); if (r) feed(`${r.name} left`); removeRemote(m.id); break; }
     case 'states':
       for (const p of m.players) {
-        if (p.id === S.myId) { S.myHp = p.hp; S.myKills = p.kills; S.myDeaths = p.deaths; continue; }
+        if (p.id === S.myId) { S.myHp = p.hp; S.myArmor = p.armor || 0; S.myKills = p.kills; S.myDeaths = p.deaths; continue; }
         const r = S.remotes.get(p.id);
         if (!r) continue;
         setRemoteHp(r, p.hp); r.kills = p.kills; r.deaths = p.deaths;
@@ -151,7 +167,7 @@ function onMsg(m) {
       break;
     }
     case 'hp':
-      if (m.id === S.myId) { S.myHp = m.hp; flash(); S.slowUntil = performance.now() + 450; }
+      if (m.id === S.myId) { S.myHp = m.hp; S.myArmor = m.armor || 0; flash(); S.slowUntil = performance.now() + 450; }
       else { const r = S.remotes.get(m.id); if (r) { setRemoteHp(r, m.hp); flinch(r); } }
       if (m.by === S.myId) hitmark();
       break;
@@ -159,7 +175,7 @@ function onMsg(m) {
       const killer = m.by === S.myId ? 'you' : (S.remotes.get(m.by)?.name || '?');
       const victim = m.id === S.myId ? 'you' : (S.remotes.get(m.id)?.name || '?');
       feed(`${killer} ☠ ${victim}`);
-      if (m.id === S.myId) { S.dead = true; S.myHp = 0; showMsg('YOU DIED — respawning…', 2000); flash(); $('deathveil').style.opacity = 1; play('death', 0.8); if (S.me) { S.me.rotation.x = Math.PI / 2; resetAnim(S.me.userData.anim); } }
+      if (m.id === S.myId) { S.dead = true; S.myHp = 0; S.myArmor = 0; showMsg('YOU DIED — respawning…', 2000); flash(); $('deathveil').style.opacity = 1; play('death', 0.8); if (S.me) { S.me.rotation.x = Math.PI / 2; resetAnim(S.me.userData.anim); } }
       else {
         const r = S.remotes.get(m.id);
         if (r) {
@@ -178,7 +194,7 @@ function onMsg(m) {
       break;
     }
     case 'respawn':
-      if (m.id === S.myId) { S.dead = false; S.myHp = 100; S.pos.set(...m.spawn); S.vel.set(0, 0, 0); $('deathveil').style.opacity = 0; if (S.me) { S.me.rotation.x = 0; resetAnim(S.me.userData.anim); } resetGun(); snapCamera(); }
+      if (m.id === S.myId) { S.dead = false; S.myHp = 100; S.myArmor = 0; S.pos.set(...m.spawn); S.vel.set(0, 0, 0); $('deathveil').style.opacity = 0; if (S.me) { S.me.rotation.x = 0; resetAnim(S.me.userData.anim); } resetGun(); snapCamera(); }
       else { const r = S.remotes.get(m.id); if (r) { reviveRemote(r); r.group.position.set(...m.spawn); } }
       break;
     case 'roundend': {
@@ -194,9 +210,11 @@ function onMsg(m) {
       break;
     }
     case 'roundstart':
-      S.frozen = false; S.dead = false; S.myHp = 100; S.myKills = 0; S.myDeaths = 0;
+      S.frozen = false; S.dead = false; S.myHp = 100; S.myArmor = 0; S.boostUntil = 0; S.myKills = 0; S.myDeaths = 0;
       $('deathveil').style.opacity = 0;
       for (const mk of medkitMeshes) mk.visible = true;
+      for (const am of armorMeshes) am.visible = true;
+      for (const bm of boostMeshes) bm.visible = true;
       for (const r of S.remotes.values()) reviveRemote(r);
       S.pos.set(...m.spawn); S.vel.set(0, 0, 0);
       if (S.me) { S.me.rotation.x = 0; resetAnim(S.me.userData.anim); }

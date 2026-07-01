@@ -84,3 +84,49 @@ export function buildWeaponSpawns(states) {
     weaponMeshes.push(g);
   });
 }
+
+// ---------- armor pickups ----------
+const ARMOR_SPAWNS = MAP.armor || []; // [x, z, y] — same source as server
+export const armorMeshes = [];
+export function buildArmor(states) {
+  if (armorMeshes.length) { // reconnect: just sync visibility
+    states.forEach((s, i) => { if (armorMeshes[i]) armorMeshes[i].visible = s !== 0; });
+    return;
+  }
+  ARMOR_SPAWNS.forEach(([x, z, y], i) => {
+    const g = new THREE.Group();
+    const base = new THREE.Mesh(new THREE.BoxGeometry(0.85, 0.4, 0.85), new THREE.MeshLambertMaterial({ color: 0x4a5568 }));
+    base.position.y = 0.55;
+    const plate = new THREE.Mesh(new THREE.BoxGeometry(0.5, 0.5, 0.16), new THREE.MeshLambertMaterial({ color: 0x6a8fb5 }));
+    plate.position.y = 0.85; plate.rotation.x = Math.PI / 2;
+    g.add(base, plate);
+    g.position.set(x, y || 0, z);
+    g.userData.baseY = y || 0;
+    g.visible = states[i] !== 0;
+    S.scene.add(g);
+    armorMeshes.push(g);
+  });
+}
+
+// ---------- boost pickups ----------
+const BOOST_SPAWNS = MAP.boosts || []; // [x, z, y] — same source as server
+export const boostMeshes = [];
+export function buildBoosts(states) {
+  if (boostMeshes.length) { // reconnect: just sync visibility
+    states.forEach((s, i) => { if (boostMeshes[i]) boostMeshes[i].visible = s !== 0; });
+    return;
+  }
+  BOOST_SPAWNS.forEach(([x, z, y], i) => {
+    const g = new THREE.Group();
+    const base = new THREE.Mesh(new THREE.BoxGeometry(0.7, 0.4, 0.7), new THREE.MeshLambertMaterial({ color: 0xe6c33a }));
+    base.position.y = 0.55;
+    const bolt = new THREE.Mesh(new THREE.BoxGeometry(0.2, 0.6, 0.2), new THREE.MeshLambertMaterial({ color: 0xfff2a0 }));
+    bolt.position.y = 0.9; bolt.rotation.z = Math.PI / 8;
+    g.add(base, bolt);
+    g.position.set(x, y || 0, z);
+    g.userData.baseY = y || 0;
+    g.visible = states[i] !== 0;
+    S.scene.add(g);
+    boostMeshes.push(g);
+  });
+}
