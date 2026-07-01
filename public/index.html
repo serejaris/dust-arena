@@ -183,14 +183,57 @@ function drawHpbar(cv, hp) {
   ctx.fillStyle = hpColor(hp); ctx.fillRect(1, 1, (HPBAR_W - 2) * frac, HPBAR_H - 2);
 }
 const HIP_Y = 0.7, BODY_Y = 0.85, GUN_Y = 1.2;
-function soldierModel(color, pid) {
+const GUN_DARK = 0x333028;
+// low-poly silhouette per weapon type — dark receiver/barrel boxes + one accent box in WEAPONS[w].color.
+// Group is pre-positioned at the old single-mesh gun anchor so callers can just add() it.
+function gunModel(w) {
+  const wpn = WEAPONS[w] || WEAPONS[0];
+  const g = new THREE.Group();
+  g.position.set(0.25, GUN_Y, -0.3);
+  const add = (sx, sy, sz, x, y, z, color) => {
+    const m = new THREE.Mesh(new THREE.BoxGeometry(sx, sy, sz), new THREE.MeshLambertMaterial({ color }));
+    m.position.set(x, y, z);
+    g.add(m);
+  };
+  // z<0 (local) points toward the muzzle/forward; the body's front face sits at local z ~ -0.1,
+  // so any box centered behind that gets buried inside the torso and never renders — keep barrels
+  // and accents centered forward of it.
+  switch (w) {
+    case 1: // SMG — short compact barrel + stub stock + long drum mag
+      add(0.08, 0.08, 0.32, 0, 0, 0.05, GUN_DARK);
+      add(0.06, 0.08, 0.14, 0, 0, 0.24, GUN_DARK);
+      add(0.05, 0.22, 0.07, 0, -0.13, 0.02, wpn.color);
+      break;
+    case 2: // DEAGLE — stubby barrel over a pistol grip
+      add(0.06, 0.06, 0.16, 0, 0, -0.06, GUN_DARK);
+      add(0.07, 0.24, 0.08, 0, -0.16, -0.02, GUN_DARK);
+      add(0.07, 0.03, 0.14, 0, 0.045, -0.06, wpn.color);
+      break;
+    case 3: // SHOTGUN — short but thick barrel + pump foregrip
+      add(0.16, 0.16, 0.4, 0, 0, -0.02, GUN_DARK);
+      add(0.18, 0.1, 0.14, 0, -0.03, -0.15, wpn.color);
+      break;
+    case 4: // AWP — long barrel + raised box scope
+      add(0.07, 0.07, 0.85, 0, 0, -0.1, GUN_DARK);
+      add(0.06, 0.09, 0.18, 0, 0.09, -0.15, wpn.color);
+      break;
+    case 5: // LMG — long thick barrel + boxy magazine
+      add(0.1, 0.1, 0.68, 0, 0, -0.05, GUN_DARK);
+      add(0.1, 0.22, 0.16, 0, -0.14, -0.08, wpn.color);
+      break;
+    default: // RIFLE — baseline length (matches the old single-box gun) + small mag accent
+      add(0.08, 0.08, 0.6, 0, 0, 0, GUN_DARK);
+      add(0.05, 0.14, 0.07, 0, -0.09, -0.15, wpn.color);
+  }
+  return g;
+}
+function soldierModel(color, pid, w = 0) {
   const g = new THREE.Group();
   const body = new THREE.Mesh(new THREE.BoxGeometry(0.7, 1.05, 0.4), new THREE.MeshLambertMaterial({ color }));
   body.position.y = BODY_Y;
   const head = new THREE.Mesh(new THREE.BoxGeometry(0.34, 0.34, 0.34), new THREE.MeshLambertMaterial({ color: 0xd9b48f }));
   head.position.y = 1.55;
-  const gun = new THREE.Mesh(new THREE.BoxGeometry(0.08, 0.08, 0.6), new THREE.MeshLambertMaterial({ color: 0x333028 }));
-  gun.position.set(0.25, GUN_Y, -0.3);
+  const gun = gunModel(w);
   // legs hang from hip pivots so they can swing through a walk cycle
   const mkLeg = (x) => {
     const pivot = new THREE.Group(); pivot.position.set(x, HIP_Y, 0);
@@ -230,6 +273,15 @@ function resetAnim(anim) {
   anim.legL.rotation.x = 0; anim.legR.rotation.x = 0;
   anim.body.position.y = BODY_Y; anim.gun.position.y = GUN_Y; anim.phase = 0;
 }
+// rebuild the held gun on weapon pickup/reset — old mesh disposed, anim.gun repointed so bobbing tracks the new one
+function swapGun(avatarGroup, w) {
+  const anim = avatarGroup.userData.anim;
+  avatarGroup.remove(anim.gun);
+  disposeGroup(anim.gun);
+  const gun = gunModel(w);
+  avatarGroup.add(gun);
+  anim.gun = gun;
+}
 
 // own avatar (visible in top-down — you ARE on the screen now)
 let me = null, myColor = '#d9a24b';
@@ -237,7 +289,7 @@ const myMuzzle = new THREE.Mesh(new THREE.BoxGeometry(0.18, 0.18, 0.18), new THR
 myMuzzle.visible = false;
 function buildMe() {
   if (me) scene.remove(me);
-  me = soldierModel(myColor, null);
+  me = soldierModel(myColor, null, myW);
   me.add(myMuzzle);
   myMuzzle.position.set(0.25, 1.2, -0.75);
   scene.add(me);
@@ -287,9 +339,9 @@ function updateParts(dt) {
 }
 
 // ---------- remote players ----------
-const remotes = new Map(); // id -> {group, label, hpbar, hpCanvas, hpTex, buf:[], name, color, hp, dead, kills, deaths}
+const remotes = new Map(); // id -> {group, label, hpbar, hpCanvas, hpTex, buf:[], name, color, hp, w, dead, kills, deaths}
 function makeRemote(p) {
-  const g = soldierModel(p.color, p.id);
+  const g = soldierModel(p.color, p.id, p.w || 0);
   const tex = new THREE.CanvasTexture(labelCanvas(p.name));
   const label = new THREE.Sprite(new THREE.SpriteMaterial({ map: tex, depthTest: false }));
   label.scale.set(2.2, 0.42, 1); label.position.y = 2.3;
@@ -300,7 +352,7 @@ function makeRemote(p) {
   g.add(label, hpbar);
   g.position.set(p.x, p.y, p.z);
   scene.add(g);
-  remotes.set(p.id, { group: g, label, hpbar, hpCanvas, hpTex, buf: [], name: p.name, color: p.color, team: p.team || 0, aimMeshes: g.userData.aimMeshes, hp: p.hp, dead: p.dead, fall: p.dead ? 1 : 0, kills: p.kills || 0, deaths: p.deaths || 0 });
+  remotes.set(p.id, { group: g, label, hpbar, hpCanvas, hpTex, buf: [], name: p.name, color: p.color, team: p.team || 0, aimMeshes: g.userData.aimMeshes, hp: p.hp, w: p.w || 0, dead: p.dead, fall: p.dead ? 1 : 0, kills: p.kills || 0, deaths: p.deaths || 0 });
   if (p.dead) { g.rotation.x = Math.PI / 2; g.position.y = 0.2; }
 }
 function setRemoteHp(r, hp) {
@@ -551,7 +603,12 @@ function onMsg(m) {
       if (m.id === myId) {
         myW = m.w; curRange = curW().range; rebuildRing();
         ammo = curW().mag;
+        if (me) swapGun(me, myW);
         if (!play('medkit', 0.6)) blip(); // reuse pickup sfx — no dedicated weapon-pickup sound yet
+      } else {
+        // snappier than waiting for the next states tick; states still reconciles as the fallback path
+        const r = remotes.get(m.id);
+        if (r && m.w !== r.w) { r.w = m.w; swapGun(r.group, r.w); }
       }
       break;
     case 'weaponup':
@@ -565,6 +622,7 @@ function onMsg(m) {
         const r = remotes.get(p.id);
         if (!r) continue;
         setRemoteHp(r, p.hp); r.kills = p.kills; r.deaths = p.deaths;
+        if (p.w !== r.w) { r.w = p.w; swapGun(r.group, r.w); } // missed-event sync (weapon pickup, round-start reset to rifle)
         if (p.dead !== r.dead) { p.dead ? killRemote(r) : reviveRemote(r); } // missed-event sync
         if (p.dead) continue;
         r.buf.push({ time: m.now, x: p.x, y: p.y, z: p.z, ry: p.ry });
@@ -753,6 +811,7 @@ function resetGun() { // death mid-reload must not carry over to the next life; 
   clearTimeout(reloadT);
   myW = 0; curRange = WEAPONS[0].range; rebuildRing();
   ammo = WEAPONS[0].mag; reloading = false; firing = false; spread = 0;
+  if (me) swapGun(me, myW);
 }
 function tracer(origin, dir, len = curRange) {
   const geo = new THREE.BufferGeometry().setFromPoints([origin, origin.clone().addScaledVector(dir, len)]);
