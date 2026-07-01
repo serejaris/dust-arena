@@ -1,6 +1,6 @@
 // hud.js — killfeed, флэши, scoreboard, showMsg
 import { S, $ } from './state.js';
-import { play, blip } from './audio.js';
+import { play, hitConfirm } from './audio.js';
 
 export const teamName = t => t === 0 ? 'ORANGE' : 'BLUE';
 export const TEAM_HUD = ['#e6b85a', '#62a0e6']; // HUD tints matching server team colors
@@ -28,11 +28,25 @@ export function healFlash() {
   f.style.opacity = 1; setTimeout(() => f.style.opacity = 0, 280);
 }
 let hmT = null;
-export function hitmark() {
+// dmg drives both paths' pitch: heavier weapon → lower tone, whether the sampled 'hit' sfx plays
+// (via playbackRate) or the procedural hitConfirm() fallback fires (#5)
+export function hitmark(dmg = 18) {
   const h = $('hitmark');
   h.style.opacity = 1;
-  if (!play('hit', 0.5)) blip();
+  const rate = Math.max(0.6, 1.35 - dmg / 130);
+  if (!play('hit', 0.5, 0, rate)) hitConfirm(dmg);
   clearTimeout(hmT); hmT = setTimeout(() => h.style.opacity = 0, 90);
+}
+// directional hit indicator — red arc on the screen edge toward the attacker, ~600ms fade (#5).
+// deg is a compass bearing (0 = up/screen-north, clockwise) because the camera never yaws
+// (world -Z is always screen-up, world +X is always screen-right — see input.js WASD comment).
+let hitdirT = null;
+export function hitDir(deg) {
+  const el = $('hitdir');
+  el.style.setProperty('--ang', deg + 'deg');
+  el.style.opacity = 1;
+  clearTimeout(hitdirT);
+  hitdirT = setTimeout(() => el.style.opacity = 0, 350);
 }
 const esc = s => String(s).replace(/[&<>"]/g, ch => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[ch]));
 export function renderScores() {

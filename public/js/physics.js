@@ -4,7 +4,7 @@ import { S } from './state.js';
 import { colliders } from './world.js';
 
 // ---------- player physics ----------
-export const P = { r: 0.4, h: 1.8, speed: 7.2, walk: 3.4, jump: 7.5, grav: 21, chest: 1.2 };
+export const P = { r: 0.4, h: 1.8, speed: 7.2, walk: 3.4, jump: 7.5, grav: 21, chest: 1.2, kbFriction: 9 };
 
 S.pos = new THREE.Vector3(0, 0, 30);
 S.vel = new THREE.Vector3();
