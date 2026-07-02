@@ -32,6 +32,15 @@ export function resetGun() { // death mid-reload must not carry over to the next
   S.ammo = WEAPONS[0].mag; S.reloading = false; S.firing = false; S.spread = 0;
   if (S.me) swapGun(S.me, S.myW);
 }
+// death-instant version of the reload/spread half of resetGun() — the weapon itself shouldn't roll
+// back to rifle until the server's respawn 2s later (matches target.w = 0 timing in server.js), but
+// a reload timer left running past death would flip S.ammo/S.reloading while the corpse is still
+// falling (axis 3: no feature field left unreset across a death)
+export function cancelReload() {
+  clearTimeout(reloadT);
+  S.reloading = false;
+  S.spread = 0;
+}
 // 2D ray-vs-AABB (slab method). Unit dir → returns entry distance, or Infinity if clear.
 // Origin sitting inside/at a box returns Infinity so a wall you're already past can't self-block.
 export function rayRectT(ox, oz, dx, dz, r) {

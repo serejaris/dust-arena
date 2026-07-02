@@ -8,7 +8,7 @@ import { curW, WEAPONS } from './weapons.js';
 import { rebuildRing, tracer, addShake, bloodBurst, SHAKE_MAX } from './fx.js';
 import { play, healSound, blip, shotSound, AC } from './audio.js';
 import { showMsg, feed, renderScores, sb, teamName, flash, healFlash, hitmark, hitDir } from './hud.js';
-import { resetGun } from './combat.js';
+import { resetGun, cancelReload } from './combat.js';
 
 // ---------- net ----------
 S.ws = null; S.myId = 0; S.myTeam = 0; S.myHp = 100; S.myKills = 0; S.myDeaths = 0; S.dead = false;
@@ -203,7 +203,7 @@ function onMsg(m) {
       const victim = m.id === S.myId ? 'you' : (S.remotes.get(m.id)?.name || '?');
       feed(`${killer} ☠ ${victim}`);
       if (m.id === S.myId) {
-        S.dead = true; S.myHp = 0; S.myArmor = 0; S.boostUntil = 0; showMsg('YOU DIED — respawning…', 2000); flash(); $('deathveil').style.opacity = 1; play('death', 0.8); if (S.me) resetAnim(S.me.userData.anim); // deathT=0 → tick()'s advanceDeath() animates the fall while S.dead is true
+        S.dead = true; S.myHp = 0; S.myArmor = 0; S.boostUntil = 0; showMsg('YOU DIED — respawning…', 2000); flash(); $('deathveil').style.opacity = 1; play('death', 0.8); cancelReload(); if (S.me) resetAnim(S.me.userData.anim); // deathT=0 → tick()'s advanceDeath() animates the fall while S.dead is true
         bloodBurst(new THREE.Vector3(S.pos.x, S.pos.y + 1.2, S.pos.z), true); // enhanced burst on the kill blow
         victimImpact(m.by, true);
       }
