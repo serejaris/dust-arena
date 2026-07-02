@@ -203,7 +203,7 @@ function onMsg(m) {
       const victim = m.id === S.myId ? 'you' : (S.remotes.get(m.id)?.name || '?');
       feed(`${killer} ☠ ${victim}`);
       if (m.id === S.myId) {
-        S.dead = true; S.myHp = 0; S.myArmor = 0; showMsg('YOU DIED — respawning…', 2000); flash(); $('deathveil').style.opacity = 1; play('death', 0.8); if (S.me) resetAnim(S.me.userData.anim); // deathT=0 → tick()'s advanceDeath() animates the fall while S.dead is true
+        S.dead = true; S.myHp = 0; S.myArmor = 0; S.boostUntil = 0; showMsg('YOU DIED — respawning…', 2000); flash(); $('deathveil').style.opacity = 1; play('death', 0.8); if (S.me) resetAnim(S.me.userData.anim); // deathT=0 → tick()'s advanceDeath() animates the fall while S.dead is true
         bloodBurst(new THREE.Vector3(S.pos.x, S.pos.y + 1.2, S.pos.z), true); // enhanced burst on the kill blow
         victimImpact(m.by, true);
       }
@@ -225,7 +225,7 @@ function onMsg(m) {
       break;
     }
     case 'respawn':
-      if (m.id === S.myId) { S.dead = false; S.myHp = 100; S.myArmor = 0; S.pos.set(...m.spawn); S.vel.set(0, 0, 0); $('deathveil').style.opacity = 0; if (S.me) { S.me.rotation.x = 0; resetAnim(S.me.userData.anim); } resetGun(); snapCamera(); }
+      if (m.id === S.myId) { S.dead = false; S.myHp = 100; S.myArmor = 0; S.boostUntil = 0; S.pos.set(...m.spawn); S.vel.set(0, 0, 0); $('deathveil').style.opacity = 0; if (S.me) { S.me.rotation.x = 0; resetAnim(S.me.userData.anim); } resetGun(); snapCamera(); }
       else { const r = S.remotes.get(m.id); if (r) { reviveRemote(r); r.group.position.set(...m.spawn); } }
       break;
     case 'roundend': {
