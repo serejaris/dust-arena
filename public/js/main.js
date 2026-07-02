@@ -5,7 +5,7 @@ import { renderer, CAM, camOffY, camOffZ, updateOcclusion } from './scene.js';
 import { P, collide } from './physics.js';
 import { curW } from './weapons.js';
 import { animateWalk, advanceCombatAnim, advanceDeath, hpColor } from './entities.js';
-import { ring, aimLine, aimGeo, updateParts } from './fx.js';
+import { ring, aimLine, aimGeo, updateParts, shakeOffset } from './fx.js';
 import { medkitMeshes, weaponMeshes, armorMeshes, boostMeshes, worldMeshes } from './world.js';
 import { updateAim } from './input.js';
 import { shoot, baseSpread } from './combat.js';
@@ -38,6 +38,16 @@ function tick(now) {
     S.hSpeed = move.lengthSq() > 0 ? sp : 0;
     S.pos.x += move.x * sp * dt;
     S.pos.z += move.z * sp * dt;
+    // knockback impulse (net.js 'hp'/'die' feed S.vel.x/z on taking a hit) — independent of the WASD
+    // delta above, bleeds off via friction so it never becomes a persistent drift (#5)
+    if (S.vel.x || S.vel.z) {
+      S.pos.x += S.vel.x * dt;
+      S.pos.z += S.vel.z * dt;
+      const kbDecay = Math.exp(-P.kbFriction * dt);
+      S.vel.x *= kbDecay; S.vel.z *= kbDecay;
+      if (Math.abs(S.vel.x) < 0.04) S.vel.x = 0;
+      if (Math.abs(S.vel.z) < 0.04) S.vel.z = 0;
+    }
     if (S.keys['Space'] && S.onGround) { S.vel.y = P.jump; S.onGround = false; }
     S.vel.y -= P.grav * dt;
     S.pos.y += S.vel.y * dt;
@@ -101,7 +111,14 @@ function tick(now) {
     if (ahead.length() > CAM.lookMax) ahead.setLength(CAM.lookMax);
     const want = new THREE.Vector3(S.pos.x + ahead.x, S.pos.y, S.pos.z + ahead.z);
     S.camTarget.lerp(want, 1 - Math.exp(-CAM.lerp * dt));
-    S.camera.position.set(S.camTarget.x, S.camTarget.y + camOffY, S.camTarget.z + camOffZ);
+    // screen shake: ephemeral per-frame jitter added on top of the follow position, never onto
+    // S.camTarget/S.pos — so it can't accumulate a drift (#5)
+    const shake = shakeOffset(dt);
+    S.camera.position.set(
+      S.camTarget.x + (shake ? shake.x : 0),
+      S.camTarget.y + camOffY + (shake ? shake.y : 0),
+      S.camTarget.z + camOffZ + (shake ? shake.z : 0)
+    );
     S.camera.lookAt(S.camTarget);
   }
   updateOcclusion(worldMeshes, SPECTATE);

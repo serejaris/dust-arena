@@ -22,6 +22,11 @@
   #healflash { inset: 0; background: radial-gradient(ellipse at center, transparent 40%, rgba(40,255,120,.35)); opacity: 0; transition: opacity .4s; }
   #deathveil { inset: 0; background: radial-gradient(ellipse at center, rgba(80,0,0,.25), rgba(60,0,0,.55)); opacity: 0; transition: opacity .5s; }
   #hitmark { top: 50%; left: 50%; transform: translate(-50%,-50%) rotate(45deg); color: #ff5544; font-size: 30px; font-weight: bold; opacity: 0; }
+  #hitdir { inset: 0; opacity: 0; transition: opacity .25s ease-out; --ang: 0deg;
+    background: conic-gradient(from calc(var(--ang) - 13deg), rgba(255,40,40,.65) 0deg, rgba(255,40,40,.65) 26deg, transparent 26deg, transparent 360deg);
+    -webkit-mask-image: radial-gradient(circle at center, transparent 55%, rgba(0,0,0,.95) 68%, transparent 88%);
+    mask-image: radial-gradient(circle at center, transparent 55%, rgba(0,0,0,.95) 68%, transparent 88%);
+  }
   #ping { top: 14px; left: 18px; font-size: 13px; color: #8a8060; }
   #scoreboard { top: 50%; left: 50%; transform: translate(-50%,-50%); background: rgba(10,10,5,.85); padding: 18px 28px; border: 1px solid #5a5238; min-width: 360px; display: none; font-size: 15px; }
   #scoreboard table { width: 100%; border-collapse: collapse; }
@@ -51,6 +56,7 @@
 <div class="hud" id="healflash"></div>
 <div class="hud" id="deathveil"></div>
 <div class="hud" id="hitmark">+</div>
+<div class="hud" id="hitdir"></div>
 <div class="hud" id="ping"></div>
 <div class="hud" id="scoreboard"></div>
 <div id="join">

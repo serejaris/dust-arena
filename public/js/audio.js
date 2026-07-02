@@ -34,11 +34,18 @@ export function play(name, vol = 1, pan = 0, rate = 1) {
   src.start();
   return true;
 }
-export function blip() {
+export function blip(freq = 1150, vol = 0.06) {
   const t = AC.currentTime;
-  const o = AC.createOscillator(); o.type = 'square'; o.frequency.value = 1150;
-  const g = AC.createGain(); g.gain.setValueAtTime(0.06, t); g.gain.exponentialRampToValueAtTime(0.001, t + 0.07);
+  const o = AC.createOscillator(); o.type = 'square'; o.frequency.value = freq;
+  const g = AC.createGain(); g.gain.setValueAtTime(vol, t); g.gain.exponentialRampToValueAtTime(0.001, t + 0.07);
   o.connect(g).connect(master); o.start(); o.stop(t + 0.08);
+}
+// hit-confirm variation for hitmark()'s fallback (#5) — reuses blip(), pitched/volumed by weapon dmg
+// so heavier weapons land a lower, punchier confirm tone than light ones
+export function hitConfirm(dmg = 18) {
+  const freq = Math.max(650, 1500 - dmg * 7);
+  const vol = 0.055 + Math.min(1, dmg / 100) * 0.05;
+  blip(freq, vol);
 }
 export function healSound() {
   const t = AC.currentTime;

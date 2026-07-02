@@ -45,6 +45,30 @@ export function updateParts(dt) {
     if (p.life <= 0) { S.scene.remove(p.m); p.m.material.dispose(); parts.splice(i, 1); }
   }
 }
+// blood — parameterized burst() for hit feedback: small puff per 'hp' tick, bigger one on 'die' (#5)
+const BLOOD_COLOR = 0xa01818;
+export function bloodBurst(p, big = false) {
+  burst(p, BLOOD_COLOR, big ? 22 : 9);
+}
+
+// ---------- camera shake (#5) ----------
+// amplitude decays exponentially; tick() reads a fresh per-frame jitter via shakeOffset() and adds it
+// to the camera position AFTER the normal follow — S.camTarget itself is never touched, so there's
+// no drift and the camera lands exactly back on the follow point once shakeAmp reaches 0.
+const SHAKE_DECAY = 20; // clears to exactly 0 within ~300ms
+export const SHAKE_MAX = 1.1;
+let shakeAmp = 0;
+export function addShake(amp) { shakeAmp = Math.min(SHAKE_MAX, shakeAmp + amp); }
+export function shakeOffset(dt) {
+  shakeAmp *= Math.exp(-SHAKE_DECAY * dt);
+  if (shakeAmp < 0.004) shakeAmp = 0;
+  if (!shakeAmp) return null;
+  return {
+    x: (Math.random() * 2 - 1) * shakeAmp,
+    y: (Math.random() * 2 - 1) * shakeAmp * 0.4,
+    z: (Math.random() * 2 - 1) * shakeAmp,
+  };
+}
 
 // ---------- tracers ----------
 export function tracer(origin, dir, len = S.curRange) {
