@@ -175,7 +175,9 @@ S.me = null; S.myColor = '#d9a24b';
 export const myMuzzle = new THREE.Mesh(new THREE.BoxGeometry(0.18, 0.18, 0.18), new THREE.MeshBasicMaterial({ color: 0xffd27a }));
 myMuzzle.visible = false;
 export function buildMe() {
-  if (S.me) S.scene.remove(S.me);
+  // reconnect calls this again — detach the shared muzzle mesh first so disposeGroup() below
+  // doesn't kill it, then dispose the old avatar's geometries/materials (was leaking every reconnect)
+  if (S.me) { S.me.remove(myMuzzle); S.scene.remove(S.me); disposeGroup(S.me); }
   S.me = soldierModel(S.myColor, null, S.myW);
   S.me.add(myMuzzle);
   myMuzzle.position.set(0.25, 1.2, -0.75);
