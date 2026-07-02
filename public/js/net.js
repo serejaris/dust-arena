@@ -195,7 +195,7 @@ function onMsg(m) {
         bloodBurst(new THREE.Vector3(S.pos.x, S.pos.y + 1.2, S.pos.z));
         victimImpact(m.by);
       }
-      else { const r = S.remotes.get(m.id); if (r) { setRemoteHp(r, m.hp); flinch(r.group); bloodBurst(r.group.position.clone().add(new THREE.Vector3(0, 1.2, 0))); } }
+      else { const r = S.remotes.get(m.id); if (r) { setRemoteHp(r, m.hp); flinch(r.group); if (r.visible) bloodBurst(r.group.position.clone().add(new THREE.Vector3(0, 1.2, 0))); } } // fog (#1): blood on a hidden enemy would leak their position
       if (m.by === S.myId) hitmark(WEAPONS[S.myW]?.dmg);
       break;
     case 'die': {

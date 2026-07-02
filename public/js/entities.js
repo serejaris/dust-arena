@@ -221,9 +221,13 @@ export function removeRemote(id) {
   if (r) { S.scene.remove(r.group); disposeGroup(r.group); S.remotes.delete(id); }
 }
 export function killRemote(r) {
-  r.dead = true; r.group.visible = true; r.label.visible = false; r.hpbar.visible = false;
+  // group.visible is left alone here — it reflects fog (#1)'s last verdict; forcing it true would
+  // pop a hidden corpse into view for players who never had LOS on this enemy
+  r.dead = true; r.label.visible = false; r.hpbar.visible = false;
   resetAnim(r.group.userData.anim); // corpse lies flat, not mid-stride; deathT=0 arms advanceDeath() to fall from here
-  bloodBurst(r.group.position.clone().add(new THREE.Vector3(0, 1.2, 0)), true); // enhanced burst on the kill (#5)
+  // blood is a free-floating scene object, not a group child, so fog's group.visible gate doesn't
+  // cover it — gate it explicitly on r.visible or a death behind fog leaks the enemy's position (#5 x #1)
+  if (r.visible) bloodBurst(r.group.position.clone().add(new THREE.Vector3(0, 1.2, 0)), true); // enhanced burst on the kill (#5)
 }
 // emissive damage-flash + hit-flinch body tilt; takes the avatar Group directly so it works for
 // remotes (r.group) and the local player (S.me) alike — flinchT lives on userData so both are stateless callers
