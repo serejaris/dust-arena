@@ -90,6 +90,11 @@ function onMsg(m) {
     case 'init':
       for (const id of [...S.remotes.keys()]) removeRemote(id); // clean slate (reconnect)
       S.dead = false; S.frozen = !!m.frozen; S.myHp = 100; S.myArmor = 0; S.boostUntil = 0;
+      // reconnect = a brand new player server-side (join always hands out w:0/fresh ammo — server
+      // has no "same player" concept to resume), but S.myW/S.ammo/S.curRange are stale from the old
+      // life; without this, buildMe() below renders the old weapon while the server authoritatively
+      // treats every hit as rifle damage (axis 3: no feature field left unreset)
+      resetGun();
       $('deathveil').style.opacity = 0;
       showMsg('', 1);
       S.myId = m.id;
