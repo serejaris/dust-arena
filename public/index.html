@@ -14,7 +14,9 @@
   #hp { left: 24px; bottom: 20px; font-size: 28px; font-weight: bold; color: #7CFC00; }
   #armor { left: 24px; bottom: 54px; font-size: 17px; font-weight: bold; color: #6a8fb5; display: none; }
   #ammo { right: 24px; bottom: 20px; font-size: 28px; font-weight: bold; }
-  #timer { top: 14px; left: 50%; transform: translateX(-50%); font-size: 22px; font-weight: bold; }
+  #team-score { top: 14px; left: 50%; transform: translateX(-50%); font-size: 18px; font-weight: bold; letter-spacing: 2px; }
+  #team-score-t { color: #d9a24b; }
+  #team-score-ct { color: #4b8bd9; }
   #killfeed { top: 14px; right: 18px; font-size: 14px; text-align: right; }
   #killfeed div { margin-bottom: 4px; background: rgba(0,0,0,.45); padding: 2px 8px; border-radius: 3px; }
   #msg { top: 38%; left: 50%; transform: translateX(-50%); font-size: 30px; font-weight: bold; color: #ffce54; text-align: center; }
@@ -49,7 +51,7 @@
 <div class="hud" id="hp">+100</div>
 <div class="hud" id="armor">ARM 0</div>
 <div class="hud" id="ammo">30 / ∞</div>
-<div class="hud" id="timer">1:00</div>
+<div class="hud" id="team-score"><span id="team-score-t">0</span><span> – </span><span id="team-score-ct">0</span></div>
 <div class="hud" id="killfeed"></div>
 <div class="hud" id="msg"></div>
 <div class="hud" id="dmgflash"></div>

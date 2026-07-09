@@ -10,13 +10,13 @@ import { medkitMeshes, weaponMeshes, armorMeshes, boostMeshes, worldMeshes } fro
 import { updateAim } from './input.js';
 import { shoot, baseSpread } from './combat.js';
 import { updateVisibility } from './visibility.js';
-import { play, blip, shotSound } from './audio.js';
-import { TEAM_HUD, renderScores, sb } from './hud.js';
+import { play, shotSound } from './audio.js';
+import { renderScores, sb } from './hud.js';
 import { SPECTATE } from './net.js';
 
 // ---------- main loop ----------
 let lastT = performance.now(), lastSend = 0;
-let stepT = 0, lastBeepSec = -1;
+let stepT = 0, lastTeamScoreT = -1, lastTeamScoreCt = -1;
 function tick(now) {
   requestAnimationFrame(tick);
   const dt = Math.min((now - lastT) / 1000, 0.05);
@@ -24,7 +24,7 @@ function tick(now) {
   let myMoving = false;
   updateVisibility(); // fog of war (#1) — every frame, before aim-assist reads r.visible below
 
-  if (S.ws && !S.dead && !S.frozen && !SPECTATE) {
+  if (S.ws && !S.dead && !SPECTATE) {
     // world-aligned WASD (camera never yaws: screen-up IS north)
     const move = new THREE.Vector3();
     if (S.keys['KeyW']) move.z -= 1;
@@ -148,9 +148,9 @@ function tick(now) {
   }
 
   // net send 20Hz
-  if (S.ws && S.ws.readyState === 1 && now - lastSend > 50) {
+  if (S.ws && S.ws.readyState === 1 && !SPECTATE && now - lastSend > 50) {
     lastSend = now;
-    S.ws.send(JSON.stringify({ t: 'state', x: +S.pos.x.toFixed(2), y: +S.pos.y.toFixed(2), z: +S.pos.z.toFixed(2), ry: +S.yaw.toFixed(3), rx: 0 }));
+    S.ws.send(JSON.stringify({ t: 'state', x: +S.pos.x.toFixed(2), y: +S.pos.y.toFixed(2), z: +S.pos.z.toFixed(2), ry: +S.yaw.toFixed(3) }));
   }
 
   // HUD
@@ -160,16 +160,16 @@ function tick(now) {
   if (S.myArmor > 0) $('armor').textContent = 'ARM ' + Math.round(S.myArmor);
   if (!S.reloading) $('ammo').textContent = `${curW().name} ${S.ammo}/∞`;
   $('crosshair').style.fontSize = Math.round(16 + S.spread * 500) + 'px'; // dynamic: shows your accuracy
-  const left = Math.max(0, S.roundEndsAt - (Date.now() + S.serverOffset));
-  const tk = [0, 0]; tk[S.myTeam] += S.myKills; for (const r of S.remotes.values()) tk[r.team] += r.kills;
-  const time = `${Math.floor(left / 60000)}:${String(Math.floor(left % 60000 / 1000)).padStart(2, '0')}`;
-  const timeCol = left <= 15000 && !S.frozen ? '#ff5544' : '#e8e0c8';
-  $('timer').innerHTML = `<span style="color:${TEAM_HUD[0]}">${tk[0]}</span>` +
-    `&nbsp;&nbsp;<span style="color:${timeCol}">${time}</span>&nbsp;&nbsp;` +
-    `<span style="color:${TEAM_HUD[1]}">${tk[1]}</span>`;
-  if (S.ws && !S.frozen && left > 0 && left <= 10000) {
-    const s = Math.floor(left / 1000);
-    if (s !== lastBeepSec) { lastBeepSec = s; blip(); }
+  const teamKills = [0, 0];
+  teamKills[S.myTeam] += S.myKills;
+  for (const r of S.remotes.values()) teamKills[r.team] += r.kills;
+  if (teamKills[0] !== lastTeamScoreT) {
+    $('team-score-t').textContent = teamKills[0];
+    lastTeamScoreT = teamKills[0];
+  }
+  if (teamKills[1] !== lastTeamScoreCt) {
+    $('team-score-ct').textContent = teamKills[1];
+    lastTeamScoreCt = teamKills[1];
   }
   if (sb.style.display === 'block') renderScores();
 

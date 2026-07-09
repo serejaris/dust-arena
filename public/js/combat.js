@@ -58,7 +58,7 @@ export function nearestWallT(ox, oz, dx, dz) {
   return best;
 }
 export function shoot(now) {
-  if (S.dead || S.frozen || S.reloading || S.ammo <= 0 || SPECTATE) return;
+  if (S.dead || S.reloading || S.ammo <= 0 || SPECTATE) return;
   if (!S.ws || S.ws.readyState !== 1) return;
   if (now - lastShot < curW().fireMs) return;
   lastShot = now; S.ammo--;

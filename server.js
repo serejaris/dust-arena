@@ -6,8 +6,6 @@ const { WebSocketServer } = require('ws');
 
 const PORT = process.env.PORT || 3000;
 const TICK_MS = 50;            // 20 Hz state broadcast
-const ROUND_MS = 1 * 60 * 1000; // 1-minute rounds — fast team deathmatch
-const ROUND_BREAK_MS = 6000;
 const RESPAWN_MS = 2000;       // snappier respawn keeps the short round flowing
 const MAX_HP = 100;
 const MEDKIT_HEAL = 50;
@@ -75,8 +73,6 @@ function getRoom(name) {
       name,
       players: new Map(), // id -> player
       sockets: new Map(), // id -> ws
-      roundEndsAt: Date.now() + ROUND_MS,
-      breakUntil: 0,
       nextTeam: 0,        // tie-break toggle for balanced team assignment
       medkits: MEDKITS.map(() => ({ downUntil: 0 })),
       weapons: WEAPON_SPAWNS.map(() => ({ downUntil: 0 })),
@@ -92,6 +88,14 @@ function broadcast(room, msg, exceptId) {
   const data = JSON.stringify(msg);
   for (const [id, ws] of room.sockets) {
     if (id !== exceptId && ws.readyState === 1) ws.send(data);
+  }
+}
+const STATE_BACKPRESSURE_LIMIT = 256 * 1024;
+
+function broadcastStates(room, msg) {
+  const data = JSON.stringify(msg);
+  for (const ws of room.sockets.values()) {
+    if (ws.readyState === 1 && ws.bufferedAmount <= STATE_BACKPRESSURE_LIMIT) ws.send(data);
   }
 }
 
@@ -124,10 +128,11 @@ function pickSpawn(room, me, team) {
 function publicPlayer(p) {
   return {
     id: p.id, name: p.name, color: p.color, team: p.team,
-    x: p.x, y: p.y, z: p.z, ry: p.ry, rx: p.rx,
+    x: p.x, y: p.y, z: p.z, ry: p.ry,
     hp: p.hp, kills: p.kills, deaths: p.deaths, dead: p.dead, w: p.w, armor: p.armor,
   };
 }
+
 
 wss.on('connection', (ws) => {
   let player = null;
@@ -158,8 +163,7 @@ wss.on('connection', (ws) => {
           weapons: room.weapons.map(m => m.downUntil > Date.now() ? 0 : 1),
           armor: room.armor.map(a => a.downUntil > Date.now() ? 0 : 1),
           boosts: room.boosts.map(b => b.downUntil > Date.now() ? 0 : 1),
-          roundEndsAt: room.roundEndsAt, now: Date.now(),
-          frozen: room.breakUntil > Date.now(),
+          now: Date.now(),
         }));
         return;
       }
@@ -169,7 +173,7 @@ wss.on('connection', (ws) => {
       player = {
         id: nextId++, name, team,
         color: TEAM_COLORS[team][shade],
-        x: sx, y: sy, z: sz, ry: 0, rx: 0,
+        x: sx, y: sy, z: sz, ry: 0,
         hp: MAX_HP, kills: 0, deaths: 0, dead: false,
         protUntil: Date.now() + SPAWN_PROT_MS,
         w: 0, armor: 0,
@@ -184,8 +188,7 @@ wss.on('connection', (ws) => {
         weapons: room.weapons.map(m => m.downUntil > Date.now() ? 0 : 1),
         armor: room.armor.map(a => a.downUntil > Date.now() ? 0 : 1),
         boosts: room.boosts.map(b => b.downUntil > Date.now() ? 0 : 1),
-        roundEndsAt: room.roundEndsAt, now: Date.now(),
-        frozen: room.breakUntil > Date.now(),
+        now: Date.now(),
       }));
       broadcast(room, { t: 'joined', player: publicPlayer(player) }, player.id);
       return;
@@ -201,8 +204,8 @@ wss.on('connection', (ws) => {
         player.x = Math.max(-72.5, Math.min(72.5, nx));
         player.y = Math.max(0, Math.min(6, ny));
         player.z = Math.max(-72.5, Math.min(72.5, nz));
-        player.ry = +msg.ry || 0; player.rx = +msg.rx || 0;
-        if (player.hp < MAX_HP && !(room.breakUntil > Date.now())) {
+        player.ry = +msg.ry || 0;
+        if (player.hp < MAX_HP) {
           for (let i = 0; i < MEDKITS.length; i++) {
             const mk = room.medkits[i];
             if (!mk || mk.downUntil) continue;
@@ -216,7 +219,6 @@ wss.on('connection', (ws) => {
             }
           }
         }
-        if (!(room.breakUntil > Date.now())) {
           for (let i = 0; i < WEAPON_SPAWNS.length; i++) {
             const mk = room.weapons[i];
             if (!mk || mk.downUntil) continue;
@@ -228,8 +230,6 @@ wss.on('connection', (ws) => {
               break;
             }
           }
-        }
-        if (player.armor < ARMOR_MAX && !(room.breakUntil > Date.now())) {
           for (let i = 0; i < ARMOR_SPAWNS.length; i++) {
             const ak = room.armor[i];
             if (!ak || ak.downUntil) continue;
@@ -242,8 +242,6 @@ wss.on('connection', (ws) => {
               break;
             }
           }
-        }
-        if (!(room.breakUntil > Date.now())) {
           for (let i = 0; i < BOOST_SPAWNS.length; i++) {
             const bk = room.boosts[i];
             if (!bk || bk.downUntil) continue;
@@ -255,7 +253,6 @@ wss.on('connection', (ws) => {
               break;
             }
           }
-        }
         break;
       }
       case 'shoot': { // tracer/sound relay — capped & validated (broadcast amplification)
@@ -269,7 +266,6 @@ wss.on('connection', (ws) => {
       }
       case 'hit': {
         const now = Date.now();
-        if (room.breakUntil > now) break;
         const target = room.players.get(+msg.target);
         if (!target || target.dead || player.dead) break;
         if (target.team === player.team) break; // no friendly fire
@@ -334,36 +330,6 @@ wss.on('connection', (ws) => {
 setInterval(() => {
   const now = Date.now();
   for (const room of rooms.values()) {
-    // round lifecycle
-    if (room.breakUntil) {
-      if (now >= room.breakUntil) {
-        room.breakUntil = 0;
-        room.roundEndsAt = now + ROUND_MS;
-        for (const m of room.medkits) m.downUntil = 0;
-        for (const m of room.weapons) m.downUntil = 0;
-        for (const a of room.armor) a.downUntil = 0;
-        for (const b of room.boosts) b.downUntil = 0;
-        for (const p of room.players.values()) {
-          p.kills = 0; p.deaths = 0; p.hp = MAX_HP; p.dead = false; p.streak = 0;
-          p.protUntil = now + SPAWN_PROT_MS;
-          p.w = 0; p.armor = 0;
-          const [sx, sy, sz] = pickSpawn(room, p, p.team);
-          p.x = sx; p.y = sy; p.z = sz;
-          p.ignoreStateUntil = now + 300;
-          const ws = room.sockets.get(p.id);
-          if (ws && ws.readyState === 1) ws.send(JSON.stringify({ t: 'roundstart', spawn: [sx, sy, sz], roundEndsAt: room.roundEndsAt, now }));
-        }
-      }
-    } else if (now >= room.roundEndsAt) {
-      room.breakUntil = now + ROUND_BREAK_MS;
-      const teamKills = [0, 0];
-      for (const p of room.players.values()) teamKills[p.team] += p.kills;
-      const winTeam = teamKills[0] === teamKills[1] ? -1 : (teamKills[0] > teamKills[1] ? 0 : 1);
-      const scores = [...room.players.values()]
-        .map(p => ({ id: p.id, name: p.name, team: p.team, kills: p.kills, deaths: p.deaths }))
-        .sort((a, b) => b.kills - a.kills);
-      broadcast(room, { t: 'roundend', scores, teamKills, winTeam, breakMs: ROUND_BREAK_MS });
-    }
     // medkit respawns
     for (let i = 0; i < room.medkits.length; i++) {
       const mk = room.medkits[i];
@@ -386,9 +352,9 @@ setInterval(() => {
     }
     // state tick
     if (room.players.size > 0) {
-      broadcast(room, {
+      broadcastStates(room, {
         t: 'states', now,
-        players: [...room.players.values()].map(p => ({ id: p.id, x: p.x, y: p.y, z: p.z, ry: p.ry, rx: p.rx, hp: p.hp, dead: p.dead, kills: p.kills, deaths: p.deaths, w: p.w, armor: p.armor })),
+        players: [...room.players.values()].map(p => [p.id, p.x, p.y, p.z, p.ry, p.hp, p.dead ? 1 : 0, p.kills, p.deaths, p.w, p.armor]),
       });
     }
   }

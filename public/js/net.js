@@ -6,13 +6,13 @@ import { makeRemote, removeRemote, killRemote, flinch, reviveRemote, setRemoteHp
 import { buildMedkits, buildWeaponSpawns, buildArmor, buildBoosts, medkitMeshes, weaponMeshes, armorMeshes, boostMeshes } from './world.js';
 import { curW, WEAPONS } from './weapons.js';
 import { rebuildRing, tracer, addShake, bloodBurst, SHAKE_MAX } from './fx.js';
-import { play, healSound, blip, shotSound, AC } from './audio.js';
-import { showMsg, feed, renderScores, sb, teamName, flash, healFlash, hitmark, hitDir } from './hud.js';
+import { play, healSound, blip, shotSound, resumeAudio } from './audio.js';
+import { showMsg, feed, flash, healFlash, hitmark, hitDir } from './hud.js';
 import { resetGun, cancelReload } from './combat.js';
 
 // ---------- net ----------
 S.ws = null; S.myId = 0; S.myTeam = 0; S.myHp = 100; S.myKills = 0; S.myDeaths = 0; S.dead = false;
-S.roundEndsAt = Date.now() + 60000; S.frozen = false; S.serverOffset = 0;
+S.serverOffset = 0;
 
 const params = new URLSearchParams(location.search);
 export const SPECTATE = !!params.get('spectate'); // ?spectate=1 — overhead map view, no join
@@ -57,7 +57,7 @@ function join() {
   connect();
   setInterval(() => { if (S.ws && S.ws.readyState === 1) S.ws.send(JSON.stringify({ t: 'ping', ts: performance.now() })); }, 2000);
   $('join').style.display = 'none';
-  AC.resume();
+  resumeAudio();
 }
 
 function snapCamera() {
@@ -89,7 +89,7 @@ function onMsg(m) {
   switch (m.t) {
     case 'init':
       for (const id of [...S.remotes.keys()]) removeRemote(id); // clean slate (reconnect)
-      S.dead = false; S.frozen = !!m.frozen; S.myHp = 100; S.myArmor = 0; S.boostUntil = 0;
+      S.dead = false; S.myHp = 100; S.myArmor = 0; S.boostUntil = 0;
       // reconnect = a brand new player server-side (join always hands out w:0/fresh ammo — server
       // has no "same player" concept to resume), but S.myW/S.ammo/S.curRange are stale from the old
       // life; without this, buildMe() below renders the old weapon while the server authoritatively
@@ -99,7 +99,7 @@ function onMsg(m) {
       showMsg('', 1);
       S.myId = m.id;
       S.pos.set(m.spawn[0], m.spawn[1], m.spawn[2]); S.vel.set(0, 0, 0);
-      S.roundEndsAt = m.roundEndsAt; S.serverOffset = m.now - Date.now();
+      S.serverOffset = m.now - Date.now();
       for (const p of m.players) {
         if (p.id !== S.myId) makeRemote(p);
         else { S.myColor = p.color; S.myTeam = p.team || 0; buildMe(); }
@@ -153,15 +153,16 @@ function onMsg(m) {
     case 'joined': makeRemote(m.player); feed(`${m.player.name} joined`); break;
     case 'left': { const r = S.remotes.get(m.id); if (r) feed(`${r.name} left`); removeRemote(m.id); break; }
     case 'states':
-      for (const p of m.players) {
-        if (p.id === S.myId) { S.myHp = p.hp; S.myArmor = p.armor || 0; S.myKills = p.kills; S.myDeaths = p.deaths; continue; }
-        const r = S.remotes.get(p.id);
+      for (const [id, x, y, z, ry, hp, dead01, kills, deaths, w, armor] of m.players) {
+        if (id === S.myId) { S.myHp = hp; S.myArmor = armor || 0; S.myKills = kills; S.myDeaths = deaths; continue; }
+        const r = S.remotes.get(id);
         if (!r) continue;
-        setRemoteHp(r, p.hp); r.kills = p.kills; r.deaths = p.deaths;
-        if (p.w !== r.w) { r.w = p.w; swapGun(r.group, r.w); } // missed-event sync (weapon pickup, round-start reset to rifle)
-        if (p.dead !== r.dead) { p.dead ? killRemote(r) : reviveRemote(r); } // missed-event sync
-        if (p.dead) continue;
-        r.buf.push({ time: m.now, x: p.x, y: p.y, z: p.z, ry: p.ry });
+        setRemoteHp(r, hp); r.kills = kills; r.deaths = deaths;
+        if (w !== r.w) { r.w = w; swapGun(r.group, r.w); } // missed-event sync (weapon pickup)
+        const dead = dead01 === 1;
+        if (dead !== r.dead) { dead ? killRemote(r) : reviveRemote(r); } // missed-event sync
+        if (dead) continue;
+        r.buf.push({ time: m.now, x, y, z, ry });
         if (r.buf.length > 20) r.buf.shift();
       }
       break;
@@ -232,33 +233,6 @@ function onMsg(m) {
     case 'respawn':
       if (m.id === S.myId) { S.dead = false; S.myHp = 100; S.myArmor = 0; S.boostUntil = 0; S.pos.set(...m.spawn); S.vel.set(0, 0, 0); $('deathveil').style.opacity = 0; if (S.me) { S.me.rotation.x = 0; resetAnim(S.me.userData.anim); } resetGun(); snapCamera(); }
       else { const r = S.remotes.get(m.id); if (r) { reviveRemote(r); r.group.position.set(...m.spawn); } }
-      break;
-    case 'roundend': {
-      S.frozen = true;
-      const tk = m.teamKills || [0, 0];
-      const hi = Math.max(tk[0], tk[1]), lo = Math.min(tk[0], tk[1]);
-      const txt = m.winTeam === -1 || m.winTeam == null
-        ? `ROUND OVER — DRAW ${tk[0]}–${tk[1]}`
-        : `ROUND OVER — ${teamName(m.winTeam)} WINS ${hi}–${lo}`;
-      showMsg(txt, m.breakMs);
-      play('roundover', 0.9);
-      sb.style.display = 'block'; renderScores();
-      break;
-    }
-    case 'roundstart':
-      S.frozen = false; S.dead = false; S.myHp = 100; S.myArmor = 0; S.boostUntil = 0; S.myKills = 0; S.myDeaths = 0;
-      $('deathveil').style.opacity = 0;
-      for (const mk of medkitMeshes) mk.visible = true;
-      for (const am of armorMeshes) am.visible = true;
-      for (const bm of boostMeshes) bm.visible = true;
-      for (const r of S.remotes.values()) reviveRemote(r);
-      S.pos.set(...m.spawn); S.vel.set(0, 0, 0);
-      if (S.me) { S.me.rotation.x = 0; resetAnim(S.me.userData.anim); }
-      resetGun();
-      S.roundEndsAt = m.roundEndsAt; S.serverOffset = m.now - Date.now();
-      sb.style.display = 'none'; showMsg('ROUND START', 1500);
-      play('roundstart', 0.9);
-      snapCamera();
       break;
   }
 }

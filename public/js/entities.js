@@ -36,106 +36,174 @@ function drawHpbar(cv, hp) {
 }
 const HIP_Y = 0.7, BODY_Y = 0.85, GUN_Y = 1.2, GUN_X = 0.25, GUN_BASE_Z = -0.3;
 const GUN_DARK = 0x333028;
-// low-poly silhouette per weapon type — dark receiver/barrel boxes + one accent box in WEAPONS[w].color.
-// Group is pre-positioned at the old single-mesh gun anchor so callers can just add() it.
-function gunModel(w) {
-  const wpn = WEAPONS[w] || WEAPONS[0];
-  const g = new THREE.Group();
-  g.position.set(GUN_X, GUN_Y, GUN_BASE_Z);
-  const add = (sx, sy, sz, x, y, z, color) => {
-    const m = new THREE.Mesh(new THREE.BoxGeometry(sx, sy, sz), new THREE.MeshLambertMaterial({ color }));
-    m.position.set(x, y, z);
-    g.add(m);
-  };
-  // z<0 (local) points toward the muzzle/forward; the body's front face sits at local z ~ -0.1,
-  // so any box centered behind that gets buried inside the torso and never renders — keep barrels
-  // and accents centered forward of it.
-  switch (w) {
-    case 1: // SMG — short compact barrel + stub stock + long drum mag
-      add(0.08, 0.08, 0.32, 0, 0, 0.05, GUN_DARK);
-      add(0.06, 0.08, 0.14, 0, 0, 0.24, GUN_DARK);
-      add(0.05, 0.22, 0.07, 0, -0.13, 0.02, wpn.color);
-      break;
-    case 2: // DEAGLE — stubby barrel over a pistol grip
-      add(0.06, 0.06, 0.16, 0, 0, -0.06, GUN_DARK);
-      add(0.07, 0.24, 0.08, 0, -0.16, -0.02, GUN_DARK);
-      add(0.07, 0.03, 0.14, 0, 0.045, -0.06, wpn.color);
-      break;
-    case 3: // SHOTGUN — short but thick barrel + pump foregrip
-      add(0.16, 0.16, 0.4, 0, 0, -0.02, GUN_DARK);
-      add(0.18, 0.1, 0.14, 0, -0.03, -0.15, wpn.color);
-      break;
-    case 4: // AWP — long barrel + raised box scope
-      add(0.07, 0.07, 0.85, 0, 0, -0.1, GUN_DARK);
-      add(0.06, 0.09, 0.18, 0, 0.09, -0.15, wpn.color);
-      break;
-    case 5: // LMG — long thick barrel + boxy magazine
-      add(0.1, 0.1, 0.68, 0, 0, -0.05, GUN_DARK);
-      add(0.1, 0.22, 0.16, 0, -0.14, -0.08, wpn.color);
-      break;
-    default: // RIFLE — baseline length (matches the old single-box gun) + small mag accent
-      add(0.08, 0.08, 0.6, 0, 0, 0, GUN_DARK);
-      add(0.05, 0.14, 0.07, 0, -0.09, -0.15, wpn.color);
+const UNIFORM_SAND = 0x625c4a, UNIFORM_CHARCOAL = 0x403f36, SKIN = 0xd9b48f;
+
+// Avatar and weapon geometry is immutable and reused. Materials stay per instance: flinching one
+// operator must never make a teammate's vest or rifle flash.
+const sharedGeometries = new WeakSet();
+const sharedBox = (x, y, z) => {
+  const geometry = new THREE.BoxGeometry(x, y, z);
+  sharedGeometries.add(geometry);
+  return geometry;
+};
+const BODY_GEOMETRY = sharedBox(0.7, 1.05, 0.4);
+const HEAD_GEOMETRY = sharedBox(0.34, 0.34, 0.34);
+const LEG_GEOMETRY = sharedBox(0.24, 0.7, 0.34);
+const operatorDetailGeometry = new Map();
+const weaponGeometry = new Map();
+
+// Merge simple boxes into one vertex-coloured draw. The detail mesh deliberately is not an
+// aimMesh: only the stable torso/head/leg hit volumes are raycastable.
+function boxAssembly(parts) {
+  const positions = [], normals = [], colors = [], indices = [];
+  let vertexOffset = 0;
+  for (const { size: [x, y, z], at: [px, py, pz], color } of parts) {
+    const box = new THREE.BoxGeometry(x, y, z);
+    box.translate(px, py, pz);
+    const position = box.getAttribute('position');
+    const normal = box.getAttribute('normal');
+    const tint = new THREE.Color(color);
+    for (let i = 0; i < position.count; i++) {
+      positions.push(position.getX(i), position.getY(i), position.getZ(i));
+      normals.push(normal.getX(i), normal.getY(i), normal.getZ(i));
+      colors.push(tint.r, tint.g, tint.b);
+    }
+    for (const index of box.index.array) indices.push(index + vertexOffset);
+    vertexOffset += position.count;
+    box.dispose();
   }
-  return g;
+  const geometry = new THREE.BufferGeometry();
+  geometry.setAttribute('position', new THREE.Float32BufferAttribute(positions, 3));
+  geometry.setAttribute('normal', new THREE.Float32BufferAttribute(normals, 3));
+  geometry.setAttribute('color', new THREE.Float32BufferAttribute(colors, 3));
+  geometry.setIndex(indices);
+  geometry.computeBoundingSphere();
+  sharedGeometries.add(geometry);
+  return geometry;
+}
+function detailGeometry(color) {
+  const accent = new THREE.Color(color).getHex();
+  const key = accent.toString(16);
+  if (!operatorDetailGeometry.has(key)) {
+    operatorDetailGeometry.set(key, boxAssembly([
+      // Chest plate and bright, top-readable team panel establish the operator's forward side.
+      { size: [0.58, 0.62, 0.09], at: [0, 0.98, -0.245], color: 0x82765c },
+      { size: [0.31, 0.13, 0.105], at: [0, 1.16, -0.255], color: accent },
+      { size: [0.19, 0.12, 0.42], at: [-0.445, 1.17, 0], color: accent },
+      { size: [0.19, 0.12, 0.42], at: [0.445, 1.17, 0], color: accent },
+      // Rear pack, helmet crown and dark visor make the outline readable from any camera angle.
+      { size: [0.46, 0.55, 0.18], at: [0, 1.04, 0.29], color: UNIFORM_CHARCOAL },
+      { size: [0.4, 0.18, 0.4], at: [0, 1.76, 0], color: UNIFORM_CHARCOAL },
+      { size: [0.27, 0.1, 0.055], at: [0, 1.58, -0.198], color: 0x1b2220 },
+    ]));
+  }
+  return operatorDetailGeometry.get(key);
+}
+
+function weaponParts(w, accent) {
+  switch (w) {
+    case 1: return [ // SMG — compact receiver, stock and long drum mag
+      { size: [0.08, 0.08, 0.32], at: [0, 0, 0.05], color: GUN_DARK },
+      { size: [0.06, 0.08, 0.14], at: [0, 0, 0.24], color: GUN_DARK },
+      { size: [0.05, 0.22, 0.07], at: [0, -0.13, 0.02], color: accent },
+    ];
+    case 2: return [ // DEAGLE — stubby barrel over a pistol grip
+      { size: [0.06, 0.06, 0.16], at: [0, 0, -0.06], color: GUN_DARK },
+      { size: [0.07, 0.24, 0.08], at: [0, -0.16, -0.02], color: GUN_DARK },
+      { size: [0.07, 0.03, 0.14], at: [0, 0.045, -0.06], color: accent },
+    ];
+    case 3: return [ // SHOTGUN — short thick barrel and pump foregrip
+      { size: [0.16, 0.16, 0.4], at: [0, 0, -0.02], color: GUN_DARK },
+      { size: [0.18, 0.1, 0.14], at: [0, -0.03, -0.15], color: accent },
+    ];
+    case 4: return [ // AWP — long barrel and raised scope
+      { size: [0.07, 0.07, 0.85], at: [0, 0, -0.1], color: GUN_DARK },
+      { size: [0.06, 0.09, 0.18], at: [0, 0.09, -0.15], color: accent },
+    ];
+    case 5: return [ // LMG — long thick barrel and box magazine
+      { size: [0.1, 0.1, 0.68], at: [0, 0, -0.05], color: GUN_DARK },
+      { size: [0.1, 0.22, 0.16], at: [0, -0.14, -0.08], color: accent },
+    ];
+    default: return [ // RIFLE — baseline length and small magazine accent
+      { size: [0.08, 0.08, 0.6], at: [0, 0, 0], color: GUN_DARK },
+      { size: [0.05, 0.14, 0.07], at: [0, -0.09, -0.15], color: accent },
+    ];
+  }
+}
+// One shared vertex-coloured mesh per weapon type replaces the old receiver/accent mesh pair.
+function gunModel(w) {
+  const weapon = WEAPONS[w] || WEAPONS[0];
+  const key = `${w}:${new THREE.Color(weapon.color).getHexString()}`;
+  if (!weaponGeometry.has(key)) weaponGeometry.set(key, boxAssembly(weaponParts(w, weapon.color)));
+  const gun = new THREE.Mesh(weaponGeometry.get(key), new THREE.MeshLambertMaterial({ vertexColors: true }));
+  gun.position.set(GUN_X, GUN_Y, GUN_BASE_Z);
+  return gun;
 }
 function soldierModel(color, pid, w = 0) {
   const g = new THREE.Group();
-  const body = new THREE.Mesh(new THREE.BoxGeometry(0.7, 1.05, 0.4), new THREE.MeshLambertMaterial({ color }));
+  // These four meshes remain the unchanged raycast volumes and animation anchors.
+  const body = new THREE.Mesh(BODY_GEOMETRY, new THREE.MeshLambertMaterial({ color: UNIFORM_SAND }));
   body.position.y = BODY_Y;
-  const head = new THREE.Mesh(new THREE.BoxGeometry(0.34, 0.34, 0.34), new THREE.MeshLambertMaterial({ color: 0xd9b48f }));
+  const head = new THREE.Mesh(HEAD_GEOMETRY, new THREE.MeshLambertMaterial({ color: SKIN }));
   head.position.y = 1.55;
+  const detail = new THREE.Mesh(detailGeometry(color), new THREE.MeshLambertMaterial({ vertexColors: true }));
   const gun = gunModel(w);
-  // legs hang from hip pivots so they can swing through a walk cycle
+  // Legs hang from hip pivots so they can swing through a walk cycle.
   const mkLeg = (x) => {
     const pivot = new THREE.Group(); pivot.position.set(x, HIP_Y, 0);
-    const leg = new THREE.Mesh(new THREE.BoxGeometry(0.24, 0.7, 0.34), new THREE.MeshLambertMaterial({ color: 0x4a4438 }));
+    const leg = new THREE.Mesh(LEG_GEOMETRY, new THREE.MeshLambertMaterial({ color: UNIFORM_CHARCOAL }));
     leg.position.y = -0.35; pivot.add(leg);
     return { pivot, leg };
   };
   const legL = mkLeg(-0.16), legR = mkLeg(0.16);
-  g.add(body, head, gun, legL.pivot, legR.pivot);
+  g.add(body, head, detail, gun, legL.pivot, legR.pivot);
   if (pid != null) for (const m of [body, head, legL.leg, legR.leg]) m.userData.pid = pid;
   g.userData.aimMeshes = [body, head, legL.leg, legR.leg];
   g.userData.anim = { group: g, body, gun, legL: legL.pivot, legR: legR.pivot, phase: 0, recoilT: 0, hitT: 0, reloadT: 0, deathT: 0 };
   return g;
 }
-// shared walk cycle: legs swing in antiphase, torso + gun bob on the down-beat
+// Shared walk cycle: legs swing in antiphase; a restrained lean and counter-sway keep the
+// operator's weapon-forward silhouette alive without touching combat animation axes.
 export function animateWalk(anim, dt, moving) {
   if (!anim) return;
   if (moving) {
     anim.phase += dt * 11;
     const s = Math.sin(anim.phase);
+    const c = Math.cos(anim.phase);
     anim.legL.rotation.x = s * 0.7;
     anim.legR.rotation.x = -s * 0.7;
-    const bob = Math.abs(Math.sin(anim.phase)) * 0.07;
+    const bob = Math.abs(s) * 0.07;
     anim.body.position.y = BODY_Y + bob;
+    anim.body.rotation.z = s * 0.035;
+    anim.gun.position.x = GUN_X + c * 0.012;
     anim.gun.position.y = GUN_Y + bob;
+    anim.gun.rotation.z = -s * 0.065;
   } else {
     const k = Math.min(1, dt * 12);
     anim.legL.rotation.x *= 1 - k;
     anim.legR.rotation.x *= 1 - k;
     anim.body.position.y += (BODY_Y - anim.body.position.y) * k;
+    anim.body.rotation.z *= 1 - k;
+    anim.gun.position.x += (GUN_X - anim.gun.position.x) * k;
     anim.gun.position.y += (GUN_Y - anim.gun.position.y) * k;
+    anim.gun.rotation.z *= 1 - k;
   }
 }
-// snap legs/torso/gun to neutral and clear combat-layer timers — dead bodies skip animateWalk,
-// so reset on death (deathT=0 also arms the fall — advanceDeath() then animates it) & on respawn/revive
+// Snap legs/torso/gun to neutral and clear combat-layer timers — dead bodies skip animateWalk,
+// so reset on death (deathT=0 also arms the fall — advanceDeath() then animates it) & on respawn/revive.
 export function resetAnim(anim) {
   if (!anim) return;
   anim.legL.rotation.x = 0; anim.legR.rotation.x = 0;
-  anim.body.position.y = BODY_Y; anim.body.rotation.x = 0;
-  anim.gun.position.y = GUN_Y; anim.gun.position.z = GUN_BASE_Z; anim.gun.rotation.x = 0;
+  anim.body.position.y = BODY_Y; anim.body.rotation.x = 0; anim.body.rotation.z = 0;
+  anim.gun.position.x = GUN_X; anim.gun.position.y = GUN_Y; anim.gun.position.z = GUN_BASE_Z;
+  anim.gun.rotation.x = 0; anim.gun.rotation.z = 0;
   anim.phase = 0;
   anim.recoilT = 0; anim.hitT = 0; anim.reloadT = 0; anim.deathT = 0;
 }
 // ---------- combat animation layers — additive, applied AFTER animateWalk() writes this frame's
-// base pose. recoil/hit are decaying impulses (trigger sets energy to 1, exponential decay);
-// reload is a continuous blend toward the S.reloading flag (no separate duration, per #6); death
-// is a one-shot 0→1 progress that eases the whole group onto its side.
-// NB: only gun.position.z/rotation.x and body.rotation.x are used here — animateWalk() never
-// touches those (it only writes body/gun .position.y absolutely-when-moving-but-EASED-when-idle),
-// so a plain "+=" on position.y would compound frame-over-frame while idle. Position.y is walk's alone. ----------
+// base pose. Recoil/hit are decaying impulses; reload is a continuous blend toward S.reloading;
+// death is a one-shot 0→1 progress that eases the whole group onto its side. Walk owns body/gun
+// position x/y and rotation z, while these layers own gun position z/rotation x and body rotation x. ----------
 const RECOIL_DECAY = 30, RECOIL_KICK_Z = 0.16, RECOIL_LIFT_ROT = 0.12; // ~100ms to fade (exp(-30*0.1)≈0.05)
 const HIT_DECAY = 15, HIT_TILT = 0.15;                                 // ~200ms to fade
 const RELOAD_LERP = 8, RELOAD_TILT = 0.45;
@@ -160,7 +228,8 @@ export function advanceDeath(anim, dt) {
   anim.group.rotation.x = e * Math.PI / 2 * 0.97;
   anim.group.position.y = e * 0.2;
 }
-// rebuild the held gun on weapon pickup/reset — old mesh disposed, anim.gun repointed so bobbing tracks the new one
+// Rebuild the held gun on weapon pickup/reset. Its per-avatar material is disposed, while the
+// immutable cached geometry remains available to every current and future weapon instance.
 export function swapGun(avatarGroup, w) {
   const anim = avatarGroup.userData.anim;
   avatarGroup.remove(anim.gun);
@@ -213,7 +282,7 @@ function disposeGroup(g) {
       if (c.material.map) c.material.map.dispose();
       c.material.dispose();
     }
-    if (c.geometry) c.geometry.dispose();
+    if (c.geometry && !sharedGeometries.has(c.geometry)) c.geometry.dispose();
   });
 }
 export function removeRemote(id) {
@@ -243,7 +312,7 @@ export function flinch(group) {
 export const TAUNTS = ['EZ', 'NICE SHOT', 'RUSH B', 'HELP!'];
 let tauntCd = 0;
 export function taunt(n) {
-  if (!S.ws || S.ws.readyState !== 1 || performance.now() < tauntCd || S.dead || S.frozen) return;
+  if (!S.ws || S.ws.readyState !== 1 || performance.now() < tauntCd || S.dead) return;
   tauntCd = performance.now() + 1500;
   S.ws.send(JSON.stringify({ t: 'chatping', n }));
   showMsg(TAUNTS[n], 1000);

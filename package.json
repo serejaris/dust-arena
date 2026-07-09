@@ -4,7 +4,9 @@
   "private": true,
   "main": "server.js",
   "scripts": {
-    "start": "node server.js"
+    "start": "node server.js",
+    "test": "node --test --test-concurrency=1 test/*.test.mjs",
+    "perf:ws": "node tools/ws-load.mjs"
   },
   "dependencies": {
     "compression": "^1.8.1",
