@@ -29,11 +29,15 @@ $('nick').value = localStorage.getItem('nick') || '';
 $('go').onclick = join;
 $('nick').addEventListener('keydown', e => e.key === 'Enter' && join());
 $('room').addEventListener('keydown', e => e.key === 'Enter' && join());
+const remoteRelation = (player) => ({
+  enemy: !SPECTATE && player.team !== S.myTeam,
+  spectator: SPECTATE,
+});
 
 let myNick = null, myRoom = null, reconnT = null;
 function connect() {
   const proto = location.protocol === 'https:' ? 'wss' : 'ws';
-  S.ws = new WebSocket(`${proto}://${location.host}`);
+  S.ws = new WebSocket(`${proto}://${location.host}/ws`);
   S.ws.onopen = () => S.ws.send(JSON.stringify({ t: 'join', name: myNick, room: myRoom, spectate: SPECTATE || undefined }));
   S.ws.onmessage = (e) => onMsg(JSON.parse(e.data));
   S.ws.onclose = () => { // auto-reconnect with same nick/room; 'init' rebuilds state
@@ -53,7 +57,7 @@ function join() {
   myNick = $('nick').value.trim() || 'player' + Math.floor(Math.random() * 99);
   myRoom = ($('room').value.trim() || 'dust').replace(/[^\w-]/g, '') || 'dust';
   localStorage.setItem('nick', myNick);
-  history.replaceState(null, '', '?room=' + myRoom);
+  history.replaceState(null, '', `/play/?room=${encodeURIComponent(myRoom)}`);
   connect();
   setInterval(() => { if (S.ws && S.ws.readyState === 1) S.ws.send(JSON.stringify({ t: 'ping', ts: performance.now() })); }, 2000);
   $('join').style.display = 'none';
@@ -100,10 +104,16 @@ function onMsg(m) {
       S.myId = m.id;
       S.pos.set(m.spawn[0], m.spawn[1], m.spawn[2]); S.vel.set(0, 0, 0);
       S.serverOffset = m.now - Date.now();
-      for (const p of m.players) {
-        if (p.id !== S.myId) makeRemote(p);
-        else { S.myColor = p.color; S.myTeam = p.team || 0; buildMe(); }
+      // Player packets are not ordered: resolve the local team before any remote's relation.
+      const self = m.players.find(p => p.id === S.myId);
+      if (self) {
+        S.myColor = self.color;
+        S.myTeam = self.team;
+        buildMe();
+      } else {
+        S.myTeam = 0;
       }
+      for (const p of m.players) if (p.id !== S.myId) makeRemote(p, remoteRelation(p));
       buildMedkits(m.medkits || []);
       buildWeaponSpawns(m.weapons || []);
       buildArmor(m.armor || []);
@@ -150,7 +160,7 @@ function onMsg(m) {
     case 'boostup':
       if (boostMeshes[m.i]) boostMeshes[m.i].visible = true;
       break;
-    case 'joined': makeRemote(m.player); feed(`${m.player.name} joined`); break;
+    case 'joined': makeRemote(m.player, remoteRelation(m.player)); feed(`${m.player.name} joined`); break;
     case 'left': { const r = S.remotes.get(m.id); if (r) feed(`${r.name} left`); removeRemote(m.id); break; }
     case 'states':
       for (const [id, x, y, z, ry, hp, dead01, kills, deaths, w, armor] of m.players) {

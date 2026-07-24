@@ -16,22 +16,25 @@ const ARMOR_RESPAWN_MS = 25000;
 const BOOST_MS = 8000;          // client-applied speed buff duration — server only gates the pickup/respawn
 const BOOST_RESPAWN_MS = 20000;
 // weapon table — single source of truth for dmg/fireMs/range/mag. id = index, id 0 = default spawn (not a pickup).
+// The pistol is deliberately the weakest thing in the game: everyone respawns with it, so every real
+// gun on the floor is worth fighting over. Rifle moved out of the spawn slot and onto the map.
 const WEAPONS = [
-  { id: 0, name: 'rifle',   dmg: 18,  fireMs: 110,  range: 40, mag: 30  },
-  { id: 1, name: 'smg',     dmg: 12,  fireMs: 70,   range: 30, mag: 40  },
-  { id: 2, name: 'deagle',  dmg: 50,  fireMs: 350,  range: 36, mag: 7   },
-  { id: 3, name: 'shotgun', dmg: 65,  fireMs: 650,  range: 14, mag: 6   },
-  { id: 4, name: 'awp',     dmg: 100, fireMs: 1500, range: 62, mag: 5   },
-  { id: 5, name: 'lmg',     dmg: 16,  fireMs: 90,   range: 38, mag: 100 },
+  { id: 0, name: 'pistol',  dmg: 22,  fireMs: 260,  range: 26, mag: 12  },
+  { id: 1, name: 'rifle',   dmg: 18,  fireMs: 110,  range: 40, mag: 30  },
+  { id: 2, name: 'smg',     dmg: 12,  fireMs: 70,   range: 30, mag: 40  },
+  { id: 3, name: 'deagle',  dmg: 50,  fireMs: 350,  range: 36, mag: 7   },
+  { id: 4, name: 'shotgun', dmg: 65,  fireMs: 650,  range: 14, mag: 6   },
+  { id: 5, name: 'awp',     dmg: 100, fireMs: 1500, range: 62, mag: 5   },
+  { id: 6, name: 'lmg',     dmg: 16,  fireMs: 90,   range: 38, mag: 100 },
 ];
 const WEAPON_RESPAWN_MS = 20000;
 const RANGE_SLACK = 6; // дальность hit-чека = wpn.range + slack (запас на движение с прошлого state)
 
 // single source of truth — same file the client renders (map v3, gen_map.py)
-const MAP = JSON.parse(fs.readFileSync(path.join(__dirname, 'public', 'map.json'), 'utf8'));
+const MAP = JSON.parse(fs.readFileSync(path.join(__dirname, 'public', 'play', 'map.json'), 'utf8'));
 const MEDKITS = MAP.medkits;   // [x, z]
 const SPAWNS = MAP.spawns;     // [x, y, z] — first half = T (south +1.5 plateau), second = CT (north)
-const WEAPON_SPAWNS = MAP.weaponSpawns || []; // [{x, z, w}] — 5 pickup points, w = 1..5
+const WEAPON_SPAWNS = MAP.weaponSpawns || []; // [{x, z, w}] — 7 pickup points, w = 1..6 (0 is the spawn pistol, never a pickup)
 const ARMOR_SPAWNS = MAP.armor || [];   // [[x, z, y]] — same shape as medkits
 const BOOST_SPAWNS = MAP.boosts || [];  // [[x, z, y]] — same shape as medkits
 
@@ -45,6 +48,12 @@ const TEAM_COLORS = [
 
 const app = express();
 app.use(require('compression')());
+app.use((req, res, next) => {
+  if (req.path !== '/play' && req.path !== '/index.html') return next();
+  const queryIndex = req.originalUrl.indexOf('?');
+  const query = queryIndex === -1 ? '' : req.originalUrl.slice(queryIndex);
+  return res.redirect(308, `${req.path === '/play' ? '/play/' : '/'}${query}`);
+});
 app.use(express.static(path.join(__dirname, 'public'), {
   setHeaders(res, file) {
     if (file.endsWith('.mp3') || file.endsWith('.svg')) res.setHeader('Cache-Control', 'public, max-age=86400');
@@ -52,7 +61,7 @@ app.use(express.static(path.join(__dirname, 'public'), {
   },
 }));
 const server = http.createServer(app);
-const wss = new WebSocketServer({ server });
+const wss = new WebSocketServer({ server, path: '/ws' });
 
 // drop dead sockets so ghost players don't linger in rooms
 setInterval(() => {

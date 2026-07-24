@@ -10,9 +10,9 @@
 // directly by other modules (aim-assist raycasts, animateWalk, damage flinch). Keep as-is.
 import * as THREE from 'three';
 import { S } from './state.js';
-import { WEAPONS } from './weapons.js';
 import { bloodBurst } from './fx.js';
 import { showMsg } from './hud.js';
+import { sharedGeometries, sharedBox, boxAssembly, gunMesh } from './weapon-mesh.js';
 
 // ---------- soldier model (own + remotes share the builder) ----------
 export const labelCanvas = (text) => {
@@ -35,52 +35,25 @@ function drawHpbar(cv, hp) {
   ctx.fillStyle = hpColor(hp); ctx.fillRect(1, 1, (HPBAR_W - 2) * frac, HPBAR_H - 2);
 }
 const HIP_Y = 0.7, BODY_Y = 0.85, GUN_Y = 1.2, GUN_X = 0.25, GUN_BASE_Z = -0.3;
-const GUN_DARK = 0x333028;
 const UNIFORM_SAND = 0x625c4a, UNIFORM_CHARCOAL = 0x403f36, SKIN = 0xd9b48f;
+// Remote enemies use a muted, readable Dust-red treatment. Their hit volumes, geometry, and
+// animation anchors remain exactly the same as every other operator.
+export const DUST_RED_PALETTE = Object.freeze({ accent: '#a9473f', body: 0x6b4139 });
+export function remotePalette(player, { enemy = false, spectator = false } = {}) {
+  if (enemy && !spectator) return DUST_RED_PALETTE;
+  return { accent: player.color, body: UNIFORM_SAND };
+}
 
-// Avatar and weapon geometry is immutable and reused. Materials stay per instance: flinching one
-// operator must never make a teammate's vest or rifle flash.
-const sharedGeometries = new WeakSet();
-const sharedBox = (x, y, z) => {
-  const geometry = new THREE.BoxGeometry(x, y, z);
-  sharedGeometries.add(geometry);
-  return geometry;
-};
+// Avatar and weapon geometry is immutable and reused (registry + box merger live in
+// weapon-mesh.js, which world.js shares for the ground pickups). Materials stay per instance:
+// flinching one operator must never make a teammate's vest or rifle flash.
 const BODY_GEOMETRY = sharedBox(0.7, 1.05, 0.4);
 const HEAD_GEOMETRY = sharedBox(0.34, 0.34, 0.34);
 const LEG_GEOMETRY = sharedBox(0.24, 0.7, 0.34);
 const operatorDetailGeometry = new Map();
-const weaponGeometry = new Map();
 
-// Merge simple boxes into one vertex-coloured draw. The detail mesh deliberately is not an
-// aimMesh: only the stable torso/head/leg hit volumes are raycastable.
-function boxAssembly(parts) {
-  const positions = [], normals = [], colors = [], indices = [];
-  let vertexOffset = 0;
-  for (const { size: [x, y, z], at: [px, py, pz], color } of parts) {
-    const box = new THREE.BoxGeometry(x, y, z);
-    box.translate(px, py, pz);
-    const position = box.getAttribute('position');
-    const normal = box.getAttribute('normal');
-    const tint = new THREE.Color(color);
-    for (let i = 0; i < position.count; i++) {
-      positions.push(position.getX(i), position.getY(i), position.getZ(i));
-      normals.push(normal.getX(i), normal.getY(i), normal.getZ(i));
-      colors.push(tint.r, tint.g, tint.b);
-    }
-    for (const index of box.index.array) indices.push(index + vertexOffset);
-    vertexOffset += position.count;
-    box.dispose();
-  }
-  const geometry = new THREE.BufferGeometry();
-  geometry.setAttribute('position', new THREE.Float32BufferAttribute(positions, 3));
-  geometry.setAttribute('normal', new THREE.Float32BufferAttribute(normals, 3));
-  geometry.setAttribute('color', new THREE.Float32BufferAttribute(colors, 3));
-  geometry.setIndex(indices);
-  geometry.computeBoundingSphere();
-  sharedGeometries.add(geometry);
-  return geometry;
-}
+// The detail mesh deliberately is not an aimMesh: only the stable torso/head/leg hit volumes
+// are raycastable.
 function detailGeometry(color) {
   const accent = new THREE.Color(color).getHex();
   const key = accent.toString(16);
@@ -100,53 +73,21 @@ function detailGeometry(color) {
   return operatorDetailGeometry.get(key);
 }
 
-function weaponParts(w, accent) {
-  switch (w) {
-    case 1: return [ // SMG — compact receiver, stock and long drum mag
-      { size: [0.08, 0.08, 0.32], at: [0, 0, 0.05], color: GUN_DARK },
-      { size: [0.06, 0.08, 0.14], at: [0, 0, 0.24], color: GUN_DARK },
-      { size: [0.05, 0.22, 0.07], at: [0, -0.13, 0.02], color: accent },
-    ];
-    case 2: return [ // DEAGLE — stubby barrel over a pistol grip
-      { size: [0.06, 0.06, 0.16], at: [0, 0, -0.06], color: GUN_DARK },
-      { size: [0.07, 0.24, 0.08], at: [0, -0.16, -0.02], color: GUN_DARK },
-      { size: [0.07, 0.03, 0.14], at: [0, 0.045, -0.06], color: accent },
-    ];
-    case 3: return [ // SHOTGUN — short thick barrel and pump foregrip
-      { size: [0.16, 0.16, 0.4], at: [0, 0, -0.02], color: GUN_DARK },
-      { size: [0.18, 0.1, 0.14], at: [0, -0.03, -0.15], color: accent },
-    ];
-    case 4: return [ // AWP — long barrel and raised scope
-      { size: [0.07, 0.07, 0.85], at: [0, 0, -0.1], color: GUN_DARK },
-      { size: [0.06, 0.09, 0.18], at: [0, 0.09, -0.15], color: accent },
-    ];
-    case 5: return [ // LMG — long thick barrel and box magazine
-      { size: [0.1, 0.1, 0.68], at: [0, 0, -0.05], color: GUN_DARK },
-      { size: [0.1, 0.22, 0.16], at: [0, -0.14, -0.08], color: accent },
-    ];
-    default: return [ // RIFLE — baseline length and small magazine accent
-      { size: [0.08, 0.08, 0.6], at: [0, 0, 0], color: GUN_DARK },
-      { size: [0.05, 0.14, 0.07], at: [0, -0.09, -0.15], color: accent },
-    ];
-  }
-}
-// One shared vertex-coloured mesh per weapon type replaces the old receiver/accent mesh pair.
+// Weapon geometry is built and cached in weapon-mesh.js; here it only gets hung off the hands at
+// the anchor animateWalk()/advanceCombatAnim() drive.
 function gunModel(w) {
-  const weapon = WEAPONS[w] || WEAPONS[0];
-  const key = `${w}:${new THREE.Color(weapon.color).getHexString()}`;
-  if (!weaponGeometry.has(key)) weaponGeometry.set(key, boxAssembly(weaponParts(w, weapon.color)));
-  const gun = new THREE.Mesh(weaponGeometry.get(key), new THREE.MeshLambertMaterial({ vertexColors: true }));
+  const gun = gunMesh(w);
   gun.position.set(GUN_X, GUN_Y, GUN_BASE_Z);
   return gun;
 }
-function soldierModel(color, pid, w = 0) {
+function soldierModel(accent, pid, w = 0, bodyColor = UNIFORM_SAND) {
   const g = new THREE.Group();
   // These four meshes remain the unchanged raycast volumes and animation anchors.
-  const body = new THREE.Mesh(BODY_GEOMETRY, new THREE.MeshLambertMaterial({ color: UNIFORM_SAND }));
+  const body = new THREE.Mesh(BODY_GEOMETRY, new THREE.MeshLambertMaterial({ color: bodyColor }));
   body.position.y = BODY_Y;
   const head = new THREE.Mesh(HEAD_GEOMETRY, new THREE.MeshLambertMaterial({ color: SKIN }));
   head.position.y = 1.55;
-  const detail = new THREE.Mesh(detailGeometry(color), new THREE.MeshLambertMaterial({ vertexColors: true }));
+  const detail = new THREE.Mesh(detailGeometry(accent), new THREE.MeshLambertMaterial({ vertexColors: true }));
   const gun = gunModel(w);
   // Legs hang from hip pivots so they can swing through a walk cycle.
   const mkLeg = (x) => {
@@ -255,8 +196,9 @@ export function buildMe() {
 
 // ---------- remote players ----------
 S.remotes = new Map(); // id -> {group, label, hpbar, hpCanvas, hpTex, buf:[], name, color, hp, w, dead, kills, deaths}
-export function makeRemote(p) {
-  const g = soldierModel(p.color, p.id, p.w || 0);
+export function makeRemote(p, relation) {
+  const palette = remotePalette(p, relation);
+  const g = soldierModel(palette.accent, p.id, p.w || 0, palette.body);
   const tex = new THREE.CanvasTexture(labelCanvas(p.name));
   const label = new THREE.Sprite(new THREE.SpriteMaterial({ map: tex, depthTest: false }));
   label.scale.set(2.2, 0.42, 1); label.position.y = 2.3;

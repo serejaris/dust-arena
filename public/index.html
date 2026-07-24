@@ -1,79 +1,168 @@
-<!DOCTYPE html>
-<html lang="en">
+<!doctype html>
+<html lang="ru">
 <head>
-<meta charset="utf-8">
-<title>DUST ARENA</title>
-<meta name="viewport" content="width=device-width, initial-scale=1">
-<link rel="icon" href="favicon.svg" type="image/svg+xml">
-<style>
-  * { margin: 0; padding: 0; box-sizing: border-box; }
-  html, body { height: 100%; overflow: hidden; background: #000; font-family: 'Courier New', monospace; }
-  #c { display: block; width: 100%; height: 100%; cursor: none; }
-  .hud { position: fixed; color: #e8e0c8; text-shadow: 0 1px 2px #000; user-select: none; pointer-events: none; }
-  #crosshair { top: 50%; left: 50%; color: #7CFC00; font-size: 22px; font-weight: bold; transform: translate(-50%,-50%); }
-  #hp { left: 24px; bottom: 20px; font-size: 28px; font-weight: bold; color: #7CFC00; }
-  #armor { left: 24px; bottom: 54px; font-size: 17px; font-weight: bold; color: #6a8fb5; display: none; }
-  #ammo { right: 24px; bottom: 20px; font-size: 28px; font-weight: bold; }
-  #team-score { top: 14px; left: 50%; transform: translateX(-50%); font-size: 18px; font-weight: bold; letter-spacing: 2px; }
-  #team-score-t { color: #d9a24b; }
-  #team-score-ct { color: #4b8bd9; }
-  #killfeed { top: 14px; right: 18px; font-size: 14px; text-align: right; }
-  #killfeed div { margin-bottom: 4px; background: rgba(0,0,0,.45); padding: 2px 8px; border-radius: 3px; }
-  #msg { top: 38%; left: 50%; transform: translateX(-50%); font-size: 30px; font-weight: bold; color: #ffce54; text-align: center; }
-  #dmgflash { inset: 0; background: radial-gradient(ellipse at center, transparent 40%, rgba(255,0,0,.45)); opacity: 0; transition: opacity .3s; }
-  #healflash { inset: 0; background: radial-gradient(ellipse at center, transparent 40%, rgba(40,255,120,.35)); opacity: 0; transition: opacity .4s; }
-  #deathveil { inset: 0; background: radial-gradient(ellipse at center, rgba(80,0,0,.25), rgba(60,0,0,.55)); opacity: 0; transition: opacity .5s; }
-  #hitmark { top: 50%; left: 50%; transform: translate(-50%,-50%) rotate(45deg); color: #ff5544; font-size: 30px; font-weight: bold; opacity: 0; }
-  #hitdir { inset: 0; opacity: 0; transition: opacity .25s ease-out; --ang: 0deg;
-    background: conic-gradient(from calc(var(--ang) - 13deg), rgba(255,40,40,.65) 0deg, rgba(255,40,40,.65) 26deg, transparent 26deg, transparent 360deg);
-    -webkit-mask-image: radial-gradient(circle at center, transparent 55%, rgba(0,0,0,.95) 68%, transparent 88%);
-    mask-image: radial-gradient(circle at center, transparent 55%, rgba(0,0,0,.95) 68%, transparent 88%);
-  }
-  #ping { top: 14px; left: 18px; font-size: 13px; color: #8a8060; }
-  #scoreboard { top: 50%; left: 50%; transform: translate(-50%,-50%); background: rgba(10,10,5,.85); padding: 18px 28px; border: 1px solid #5a5238; min-width: 360px; display: none; font-size: 15px; }
-  #scoreboard table { width: 100%; border-collapse: collapse; }
-  #scoreboard td, #scoreboard th { padding: 4px 10px; text-align: left; }
-  #scoreboard th { color: #ffce54; border-bottom: 1px solid #5a5238; }
-  #join { position: fixed; inset: 0; background: linear-gradient(#2a2415, #0e0c06); display: flex; align-items: center; justify-content: center; z-index: 10; cursor: auto; }
-  #join .box { background: rgba(20,18,8,.92); border: 1px solid #6b5f33; padding: 36px 44px; text-align: center; color: #e8e0c8; max-width: calc(100vw - 24px); box-sizing: border-box; }
-  #join input { max-width: 100%; }
-  #join h1 { color: #ffce54; letter-spacing: 6px; margin-bottom: 6px; font-size: 34px; }
-  #join p.sub { color: #8a8060; margin-bottom: 22px; font-size: 13px; letter-spacing: 2px; }
-  #join input { display: block; width: 260px; margin: 10px auto; padding: 10px 12px; background: #0e0c06; border: 1px solid #6b5f33; color: #e8e0c8; font-family: inherit; font-size: 15px; }
-  #join button { margin-top: 14px; padding: 12px 38px; background: #6b5f33; color: #14120a; border: 0; font-family: inherit; font-weight: bold; font-size: 16px; cursor: pointer; letter-spacing: 2px; }
-  #join button:hover { background: #ffce54; }
-  #join .hint { margin-top: 16px; font-size: 12px; color: #8a8060; line-height: 1.6; }
-</style>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="description" content="Dust Arena — живая командная перестрелка с подбором оружия, ресурсами на карте и русским голосом за серию.">
+  <meta name="theme-color" content="#171A16">
+  <link rel="icon" href="/favicon.svg" type="image/svg+xml">
+  <link rel="stylesheet" href="/landing.css">
+  <title>Dust Arena — командная арена</title>
 </head>
 <body>
-<canvas id="c"></canvas>
-<div class="hud" id="crosshair">+</div>
-<div class="hud" id="hp">+100</div>
-<div class="hud" id="armor">ARM 0</div>
-<div class="hud" id="ammo">30 / ∞</div>
-<div class="hud" id="team-score"><span id="team-score-t">0</span><span> – </span><span id="team-score-ct">0</span></div>
-<div class="hud" id="killfeed"></div>
-<div class="hud" id="msg"></div>
-<div class="hud" id="dmgflash"></div>
-<div class="hud" id="healflash"></div>
-<div class="hud" id="deathveil"></div>
-<div class="hud" id="hitmark">+</div>
-<div class="hud" id="hitdir"></div>
-<div class="hud" id="ping"></div>
-<div class="hud" id="scoreboard"></div>
-<div id="join">
-  <div class="box">
-    <h1>DUST ARENA</h1>
-    <p class="sub">top-down team arena &middot; de_dust vibes</p>
-    <input id="nick" maxlength="16" placeholder="nickname">
-    <input id="room" maxlength="24" placeholder="room (default: dust)">
-    <button id="go">ENTER →</button>
-    <div class="hint">auto team-balanced &middot; frag the other color<br>WASD move &middot; MOUSE aim &middot; LMB shoot<br>SPACE jump &middot; R reload &middot; TAB scoreboard &middot; M mute<br>1-4 taunts (EZ / NICE SHOT / RUSH B / HELP!)</div>
-  </div>
-</div>
-<script type="importmap">
-{ "imports": { "three": "https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.js" } }
-</script>
-<script type="module" src="js/main.js"></script>
+  <a class="skip-link" href="#main-content">К содержимому</a>
+
+  <header class="site-header">
+    <a class="brand" href="/" aria-label="Dust Arena — главная">Dust Arena</a>
+    <nav class="site-nav" aria-label="Основная навигация">
+      <a href="#arena">Арена</a>
+      <a href="#arsenal">Арсенал</a>
+      <a href="#tactics">Тактика</a>
+      <a class="nav-play" href="/play/">Войти</a>
+    </nav>
+  </header>
+
+  <main id="main-content">
+    <section class="hero" aria-labelledby="hero-title">
+      <div class="hero-grid">
+        <div>
+          <p class="eyebrow">TOP-DOWN TEAM ARENA</p>
+          <h1 id="hero-title">Песок под ногами. Противник на прицеле.</h1>
+          <p class="hero-copy">Dust Arena — живая командная перестрелка с подбором оружия, ресурсами на карте и русским голосом за серию.</p>
+          <div class="hero-actions">
+            <a class="button button-primary" href="/play/">ВОЙТИ В АРЕНУ</a>
+            <a class="button button-secondary" href="/play/?spectate=1">СМОТРЕТЬ МАТЧ</a>
+          </div>
+          <ul class="hero-meta" aria-label="Ключевые особенности">
+            <li>две команды</li>
+            <li>вид сверху</li>
+            <li>живые комнаты</li>
+          </ul>
+        </div>
+
+        <figure class="hero-visual">
+          <div class="hero-image-wrap">
+            <img src="/assets/hero-arena.webp" alt="Игровой бой Dust Arena сверху: операторы сходятся на песчаной арене">
+          </div>
+          <span class="los-wedge" aria-hidden="true"></span>
+          <figcaption>Линия обзора ведёт прицел. Преграды оставляют противника вне поля зрения.</figcaption>
+        </figure>
+      </div>
+    </section>
+
+    <div class="tactical-rule" aria-hidden="true"></div>
+
+    <section class="section" id="arena" aria-labelledby="arena-title">
+      <header class="section-heading">
+        <p class="section-kicker">Режим матча</p>
+        <div>
+          <h2 id="arena-title">Две стороны. Одна арена.</h2>
+          <p>Команды подбираются автоматически. Зайди в комнату — матч уже идёт, а счёт собирает каждое устранение.</p>
+        </div>
+      </header>
+      <div class="teams-grid">
+        <article class="team-card orange">
+          <span class="team-signal" aria-hidden="true"></span>
+          <p class="signal-label">Команда 01</p>
+          <h3>Оранжевая</h3>
+          <p>Держите угол, собирайте фраги, не отдавайте пространство.</p>
+        </article>
+        <article class="team-card blue">
+          <span class="team-signal" aria-hidden="true"></span>
+          <p class="signal-label">Команда 02</p>
+          <h3>Синяя</h3>
+          <p>Читайте движение противника и отвечайте с выгодной позиции.</p>
+        </article>
+        <aside class="match-note" aria-label="Непрерывный матч">
+          <p class="signal-label">Живая комната</p>
+          <h3>Без паузы между вашими решениями.</h3>
+          <p>Зашли, система распределила команды, продолжили матч — или наблюдайте за ним со стороны.</p>
+        </aside>
+      </div>
+    </section>
+
+    <div class="tactical-rule" aria-hidden="true"></div>
+
+    <section class="section feature" id="arsenal" aria-labelledby="arsenal-title">
+      <figure class="feature-image">
+        <img src="/assets/arsenal-arena.webp" alt="Подбор оружия на песчаной арене Dust Arena">
+        <figcaption><span>Подбор оружия</span><span>На карте</span></figcaption>
+      </figure>
+      <div class="feature-copy">
+        <p class="section-kicker">Оружие</p>
+        <h2 id="arsenal-title">Подбери свой темп.</h2>
+        <p>Начинайте с rifle и забирайте оружие с карты, чтобы играть от своей дистанции и ритма.</p>
+        <ul class="weapon-list" aria-label="Оружие в Dust Arena">
+          <li>RIFLE</li>
+          <li>SMG</li>
+          <li>DEAGLE</li>
+          <li>SHOTGUN</li>
+          <li>AWP</li>
+          <li>LMG</li>
+        </ul>
+      </div>
+    </section>
+
+    <div class="tactical-rule" aria-hidden="true"></div>
+
+    <section class="section tactical-section feature reverse" id="tactics" aria-labelledby="tactics-title">
+      <figure class="feature-image">
+        <img src="/assets/tactical-arena.webp" alt="Тактический вид сверху на коридоры и укрытия песчаной арены Dust Arena">
+        <figcaption><span>Карта и укрытия</span><span>Вид сверху</span></figcaption>
+      </figure>
+      <div class="feature-copy">
+        <p class="section-kicker">Контроль карты</p>
+        <h2 id="tactics-title">Дави центр. Забирай ресурс.</h2>
+        <p>На арене появляются предметы, которые помогают пережить перестрелку и продолжить давление.</p>
+        <ul class="resource-list" aria-label="Ресурсы на карте">
+          <li><strong>Медкит</strong><span>Возвращает здоровье.</span></li>
+          <li><strong>Броня</strong><span>Добавляет защиту.</span></li>
+          <li><strong>Буст</strong><span>Даёт ускорение на время.</span></li>
+        </ul>
+        <h3>Видно — значит честно.</h3>
+        <p>Туман войны скрывает врагов за препятствиями и вне вашего обзора. Близкая цель или чистая линия прицела возвращают контакт.</p>
+      </div>
+    </section>
+
+    <section class="operator-audio" aria-labelledby="readable-title">
+      <div class="section">
+        <header class="section-heading">
+          <p class="section-kicker">Сигналы боя</p>
+          <div>
+            <h2 id="readable-title">Свой цвет видно сразу.</h2>
+            <p>Форма операторов читается сверху, чтобы в темпе боя различать своих, врагов и направление.</p>
+          </div>
+        </header>
+        <div class="operator-grid">
+          <article class="operator-copy">
+            <div class="operator-swatch" aria-label="Палитра оператора"><i aria-hidden="true"></i><i aria-hidden="true"></i><i aria-hidden="true"></i><i aria-hidden="true"></i></div>
+            <h3>Силуэт без догадок.</h3>
+            <p>Песчаная форма, тёмный шлем и визор, рюкзак и цветные панели на груди и плече дают быстрый ориентир в схватке.</p>
+          </article>
+          <article class="audio-card">
+            <p class="signal-label">Звук арены</p>
+            <div class="frequency" aria-hidden="true"><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i></div>
+            <h3>Серия звучит по-русски.</h3>
+            <p>Русский голос отмечает серии, а за боем идёт зацикленная музыка арены. Звук можно выключить в матче.</p>
+          </article>
+        </div>
+      </div>
+    </section>
+
+    <section class="closing" aria-labelledby="closing-title">
+      <p class="section-kicker">Комната открыта</p>
+      <h2 id="closing-title">Комната ждёт команду.</h2>
+      <p>Ник, комната — и в матч.</p>
+      <div class="cta-actions">
+        <a class="button button-primary" href="/play/">ВОЙТИ В АРЕНУ</a>
+        <a class="button button-secondary" href="/play/?spectate=1">СМОТРЕТЬ МАТЧ</a>
+      </div>
+    </section>
+  </main>
+
+  <footer class="site-footer">
+    <span>Dust Arena</span>
+    <a href="/play/">Открыть игру</a>
+  </footer>
 </body>
 </html>

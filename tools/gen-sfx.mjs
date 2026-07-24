@@ -5,7 +5,7 @@ import { join, dirname } from 'path';
 import { fileURLToPath } from 'url';
 import os from 'os';
 
-const OUT = join(dirname(fileURLToPath(import.meta.url)), '..', 'public', 'sfx');
+const OUT = join(dirname(fileURLToPath(import.meta.url)), '..', 'public', 'play', 'sfx');
 const API = 'https://api.elevenlabs.io/v1';
 const TTS_VOICE = 'pNInz6obpgDQGcFmaJgB';
 const MODES = new Set(['sfx', 'voices', 'music', 'all']);

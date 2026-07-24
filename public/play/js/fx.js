@@ -21,6 +21,47 @@ aimLine.visible = false;
 aimLine.frustumCulled = false; // geometry mutates every frame; stale bounding sphere would cull it
 S.scene.add(aimLine);
 
+// ---------- enemy reveal cue ----------
+// These rings have their own materials and are never attached to player models, so the
+// transient cue cannot mutate shared avatar opacity or alter the fog verdict.
+const REVEAL_LIFE_MS = 380;
+const revealGeo = new THREE.RingGeometry(0.82, 1, 40).rotateX(-Math.PI / 2);
+const revealRings = [];
+for (let i = 0; i < 6; i++) {
+  const mesh = new THREE.Mesh(revealGeo, new THREE.MeshBasicMaterial({
+    color: 0xf3d27b, transparent: true, opacity: 0, depthWrite: false,
+  }));
+  mesh.visible = false;
+  mesh.userData.started = -Infinity;
+  S.scene.add(mesh);
+  revealRings.push(mesh);
+}
+export function triggerRevealCue(remote) {
+  let ring = revealRings[0];
+  for (const candidate of revealRings) {
+    if (!candidate.visible) { ring = candidate; break; }
+    if (candidate.userData.started < ring.userData.started) ring = candidate;
+  }
+  const position = remote.group.position;
+  ring.position.set(position.x, position.y + 0.07, position.z);
+  ring.scale.setScalar(0.28);
+  ring.material.opacity = 0.72;
+  ring.userData.remote = remote;
+  ring.userData.started = performance.now();
+  ring.visible = true;
+}
+export function updateRevealCues(now) {
+  for (const ring of revealRings) {
+    if (!ring.visible) continue;
+    const remote = ring.userData.remote;
+    if (S.dead || !remote || !remote.visible || remote.dead) { ring.visible = false; continue; }
+    const progress = (now - ring.userData.started) / REVEAL_LIFE_MS;
+    if (progress >= 1) { ring.visible = false; continue; }
+    ring.scale.setScalar(0.28 + progress * 1.9);
+    ring.material.opacity = (1 - progress) * 0.72;
+  }
+}
+
 // ---------- particles ----------
 export const parts = [];
 export const partGeo = new THREE.BoxGeometry(0.09, 0.09, 0.09);

@@ -184,7 +184,7 @@ async function run() {
   const loopDelay = monitorEventLoopDelay({ resolution: 1 });
   try {
     server = await startServer();
-    const url = `ws://127.0.0.1:${server.port}`;
+    const url = `ws://127.0.0.1:${server.port}/ws`;
     const connections = await Promise.all(Array.from({ length: options.players }, (_, index) => connectClient(url, index, active, clients)));
 
     for (const client of clients) {

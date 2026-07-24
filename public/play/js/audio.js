@@ -27,7 +27,7 @@ const AUDIO_FILES = {
 };
 const ANNOUNCER_KEYS = new Set(['onfire', 'rampage', 'godlike', 'unstoppable']);
 for (const [name, filename] of Object.entries(AUDIO_FILES)) {
-  fetch(`sfx/${filename}`)
+  fetch(`/play/sfx/${filename}`)
     .then(response => response.ok ? response.arrayBuffer() : Promise.reject())
     .then(bytes => AC.decodeAudioData(bytes))
     .then(buffer => { SFX[name] = buffer; })
@@ -38,7 +38,7 @@ let musicBuffer = null;
 let musicStarted = false;
 let musicAllowed = false;
 let duckUntil = 0;
-fetch('sfx/arena-loop.mp3')
+fetch('/play/sfx/arena-loop.mp3')
   .then(response => response.ok ? response.arrayBuffer() : Promise.reject())
   .then(bytes => AC.decodeAudioData(bytes))
   .then(buffer => {

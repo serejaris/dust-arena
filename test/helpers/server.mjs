@@ -60,18 +60,36 @@ export async function stopServer(child) {
   }
 }
 
-export async function join(url, name = 'contract') {
+export async function join(url, name = 'contract', { collectMessages = true } = {}) {
   const ws = new WebSocket(url);
   await Promise.race([
     once(ws, 'open'),
     once(ws, 'error').then(([error]) => Promise.reject(error)),
   ]);
   const messages = [];
-  ws.on('message', raw => {
-    try { messages.push(JSON.parse(raw.toString())); } catch { /* asserted by callers if relevant */ }
+  let resolveInit;
+  let rejectInit;
+  const receivedInit = new Promise((resolve, reject) => {
+    resolveInit = resolve;
+    rejectInit = reject;
   });
+  const onMessage = raw => {
+    try {
+      const message = JSON.parse(raw.toString());
+      if (collectMessages) messages.push(message);
+      if (message.t === 'init') {
+        resolveInit(message);
+        if (!collectMessages) ws.off('message', onMessage);
+      }
+    } catch { /* asserted by callers if relevant */ }
+  };
+  ws.on('message', onMessage);
   ws.send(JSON.stringify({ t: 'join', name, room: 'contract-room' }));
-  const init = await waitForMessage(messages, message => message.t === 'init');
+  const initTimeout = setTimeout(
+    () => rejectInit(new Error('Timed out after 1500ms waiting for protocol message')),
+    1_500,
+  );
+  const init = await receivedInit.finally(() => clearTimeout(initTimeout));
   return { ws, messages, init };
 }
 

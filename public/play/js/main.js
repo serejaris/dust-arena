@@ -5,7 +5,7 @@ import { renderer, CAM, camOffY, camOffZ, updateOcclusion } from './scene.js';
 import { P, collide } from './physics.js';
 import { curW } from './weapons.js';
 import { animateWalk, advanceCombatAnim, advanceDeath, hpColor } from './entities.js';
-import { ring, aimLine, aimGeo, updateParts, shakeOffset } from './fx.js';
+import { ring, aimLine, aimGeo, updateParts, updateRevealCues, shakeOffset } from './fx.js';
 import { medkitMeshes, weaponMeshes, armorMeshes, boostMeshes, worldMeshes } from './world.js';
 import { updateAim } from './input.js';
 import { shoot, baseSpread } from './combat.js';
@@ -13,6 +13,11 @@ import { updateVisibility } from './visibility.js';
 import { play, shotSound } from './audio.js';
 import { renderScores, sb } from './hud.js';
 import { SPECTATE } from './net.js';
+import { initMinimap, updateMinimap } from './minimap.js';
+import { initVisibilityField, updateVisibilityField } from './vision-field.js';
+
+initMinimap();
+initVisibilityField();
 
 // ---------- main loop ----------
 let lastT = performance.now(), lastSend = 0;
@@ -22,7 +27,6 @@ function tick(now) {
   const dt = Math.min((now - lastT) / 1000, 0.05);
   lastT = now;
   let myMoving = false;
-  updateVisibility(); // fog of war (#1) — every frame, before aim-assist reads r.visible below
 
   if (S.ws && !S.dead && !SPECTATE) {
     // world-aligned WASD (camera never yaws: screen-up IS north)
@@ -146,6 +150,13 @@ function tick(now) {
     animateWalk(r.group.userData.anim, dt, moved > 0.012);
     advanceCombatAnim(r.group.userData.anim, dt); // recoil/hit decay atop the walk pose just set (no reload — not broadcast)
   }
+
+  // The remote positions must settle before the one authoritative fog verdict. Aim assist
+  // intentionally reads the previous frame's verdict, avoiding a second LOS pass.
+  updateVisibility();
+  updateRevealCues(now);
+  updateVisibilityField(now);
+  updateMinimap(now, sb.style.display === 'block');
 
   // net send 20Hz
   if (S.ws && S.ws.readyState === 1 && !SPECTATE && now - lastSend > 50) {

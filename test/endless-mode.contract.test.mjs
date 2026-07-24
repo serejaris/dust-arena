@@ -21,7 +21,7 @@ test('endless protocol sends a clock-synced init and compact periodic state rows
   let second;
   try {
     server = await startServer();
-    const url = `ws://127.0.0.1:${server.port}`;
+    const url = `ws://127.0.0.1:${server.port}/ws`;
     first = await join(url, 'first');
     second = await join(url, 'second');
 
@@ -54,7 +54,7 @@ test('endless protocol sends a clock-synced init and compact periodic state rows
 });
 
 test('round lifecycle identifiers are absent from the server and browser source', async () => {
-  const files = ['server.js', 'public/index.html', ...(await sourceFiles('public/js')).filter(file => file.endsWith('.js'))];
+  const files = ['server.js', 'public/play/index.html', ...(await sourceFiles('public/play/js')).filter(file => file.endsWith('.js'))];
   const violations = [];
   for (const file of files) {
     const source = await readFile(file, 'utf8');
@@ -65,7 +65,7 @@ test('round lifecycle identifiers are absent from the server and browser source'
 });
 
 test('HUD has team score but no round timer element', async () => {
-  const html = await readFile('public/index.html', 'utf8');
+  const html = await readFile('public/play/index.html', 'utf8');
   assert.doesNotMatch(html, /id=["']timer["']/i, 'round timer HUD element must be removed');
   assert.match(html, /id=["']team-score["']/i, 'HUD must provide the team score element');
 });
